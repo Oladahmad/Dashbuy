@@ -1,0 +1,396 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import { useRouter } from "next/navigation";
+
+type JobStatus = "pending_pickup" | "picked_up" | "delivered" | "cancelled";
+
+type LogisticsJobRow = {
+  id: string;
+  order_id: string;
+  vendor_id: string;
+  customer_id: string;
+
+  status: JobStatus;
+  created_at: string;
+
+  vendor_name: string | null;
+  vendor_phone: string | null;
+  vendor_address: string | null;
+
+  customer_name: string | null;
+  customer_phone: string | null;
+  delivery_address: string | null;
+
+  order_type: string | null;
+  food_mode: string | null;
+  order_total: number | null;
+};
+
+type VendorProfile = {
+  id: string;
+  full_name: string | null;
+  phone: string | null;
+  address: string | null;
+  store_name: string | null;
+};
+
+function safeNumber(x: unknown, fallback = 0) {
+  if (typeof x === "number" && Number.isFinite(x)) return x;
+  if (typeof x === "string") {
+    const n = Number(x);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
+function naira(n: number) {
+  const v = Math.max(0, Math.floor(n));
+  return "₦" + v.toLocaleString();
+}
+
+function fmtDateTime(iso: string) {
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function orderLabel(j: LogisticsJobRow) {
+  if (j.order_type === "product") return "Products order";
+  if ((j.food_mode ?? "plate") === "combo") return "Food combo order";
+  return "Food plate order";
+}
+
+function cleanText(s: string | null | undefined) {
+  return String(s ?? "").trim();
+}
+
+export default function LogisticsPage() {
+  const router = useRouter();
+
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const [jobs, setJobs] = useState<LogisticsJobRow[]>([]);
+  const [tab, setTab] = useState<"pending_pickup" | "picked_up">("pending_pickup");
+
+  const [selected, setSelected] = useState<LogisticsJobRow | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function load() {
+      setLoading(true);
+      setMsg(null);
+
+      const { data: u } = await supabase.auth.getUser();
+      const user = u.user;
+
+      if (!user) {
+        if (alive) {
+          setMsg("Not signed in");
+          setLoading(false);
+        }
+        return;
+      }
+
+      const { data: prof, error: pErr } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (pErr) {
+        if (alive) {
+          setMsg("Profile error: " + pErr.message);
+          setLoading(false);
+        }
+        return;
+      }
+
+      const role = String(prof?.role ?? "");
+      if (role !== "logistics" && role !== "admin") {
+        if (alive) {
+          setMsg("You are not authorized for logistics");
+          setLoading(false);
+        }
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("logistics_jobs")
+        .select(
+          "id,order_id,vendor_id,customer_id,status,created_at,vendor_name,vendor_phone,vendor_address,customer_name,customer_phone,delivery_address,order_type,food_mode,order_total"
+        )
+        .order("created_at", { ascending: false });
+
+      if (!alive) return;
+
+      if (error) {
+        setMsg(error.message);
+        setJobs([]);
+        setLoading(false);
+        return;
+      }
+
+      const rows = (data ?? []) as LogisticsJobRow[];
+
+      const vendorIds = Array.from(
+        new Set(
+          rows
+            .map((r) => r.vendor_id)
+            .filter((x) => cleanText(x).length > 0)
+        )
+      );
+
+      const vendorMap = new Map<string, VendorProfile>();
+
+      if (vendorIds.length > 0) {
+        const { data: vendors, error: vErr } = await supabase
+          .from("profiles")
+          .select("id,full_name,phone,address,store_name")
+          .in("id", vendorIds);
+
+        if (!vErr && vendors) {
+          for (const v of vendors as VendorProfile[]) {
+            vendorMap.set(v.id, v);
+          }
+        }
+      }
+
+      const merged = rows.map((j) => {
+        const v = vendorMap.get(j.vendor_id);
+
+        const vendorName =
+          cleanText(j.vendor_name) ||
+          cleanText(v?.store_name) ||
+          cleanText(v?.full_name) ||
+          "";
+
+        const vendorPhone =
+          cleanText(j.vendor_phone) ||
+          cleanText(v?.phone) ||
+          "";
+
+        const vendorAddress =
+          cleanText(j.vendor_address) ||
+          cleanText(v?.address) ||
+          "";
+
+        return {
+          ...j,
+          vendor_name: vendorName || null,
+          vendor_phone: vendorPhone || null,
+          vendor_address: vendorAddress || null,
+        };
+      });
+
+      setJobs(merged);
+      setLoading(false);
+    }
+
+    load();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const pendingPickupJobs = useMemo(
+    () => jobs.filter((j) => j.status === "pending_pickup"),
+    [jobs]
+  );
+  const pickedUpJobs = useMemo(
+    () => jobs.filter((j) => j.status === "picked_up"),
+    [jobs]
+  );
+
+  const list = tab === "pending_pickup" ? pendingPickupJobs : pickedUpJobs;
+
+  async function setJobStatus(job: LogisticsJobRow, next: JobStatus) {
+    setSaving(true);
+    setMsg(null);
+
+    const { error } = await supabase
+      .from("logistics_jobs")
+      .update({ status: next })
+      .eq("id", job.id);
+
+    if (error) {
+      setSaving(false);
+      setMsg(error.message);
+      return;
+    }
+
+    setJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, status: next } : j)));
+    setSelected((prev) => (prev && prev.id === job.id ? { ...prev, status: next } : prev));
+    setSaving(false);
+
+    if (next === "picked_up") setTab("picked_up");
+  }
+
+  if (loading) return <main className="p-6">Loading...</main>;
+
+  return (
+    <main className="p-4 max-w-4xl mx-auto space-y-4">
+      <div className="rounded-2xl border bg-white p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-base font-semibold">Logistics</p>
+            <p className="text-sm text-gray-600 mt-1">Assigned and picked up deliveries</p>
+          </div>
+
+          <button
+            type="button"
+            className="rounded-xl border px-3 py-2 text-sm"
+            onClick={() => router.push("/logistics/history")}
+          >
+            History
+          </button>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            className={`rounded-xl border px-4 py-3 text-sm ${tab === "pending_pickup" ? "bg-black text-white" : "bg-white"}`}
+            onClick={() => setTab("pending_pickup")}
+          >
+            Pending pickup ({pendingPickupJobs.length})
+          </button>
+
+          <button
+            type="button"
+            className={`rounded-xl border px-4 py-3 text-sm ${tab === "picked_up" ? "bg-black text-white" : "bg-white"}`}
+            onClick={() => setTab("picked_up")}
+          >
+            Picked up ({pickedUpJobs.length})
+          </button>
+        </div>
+
+        {msg ? <p className="text-sm text-red-600 mt-3">{msg}</p> : null}
+      </div>
+
+      <div className="rounded-2xl border bg-white p-4">
+        {list.length === 0 ? (
+          <p className="text-sm text-gray-600">No jobs in this section</p>
+        ) : (
+          <div className="space-y-2">
+            {list.map((j) => {
+              const gross = safeNumber(j.order_total, 0);
+
+              const vendorName = cleanText(j.vendor_name) ? j.vendor_name : "Vendor";
+              const vendorPhone = cleanText(j.vendor_phone) ? j.vendor_phone : "No vendor phone";
+              const vendorAddress = cleanText(j.vendor_address) ? j.vendor_address : "No vendor address";
+
+              const customerName = cleanText(j.customer_name) ? j.customer_name : "Customer";
+              const customerPhone = cleanText(j.customer_phone) ? j.customer_phone : "No customer phone";
+              const deliveryAddress = cleanText(j.delivery_address) ? j.delivery_address : "No delivery address";
+
+              return (
+                <button
+                  key={j.id}
+                  type="button"
+                  className="w-full text-left rounded-2xl border p-3 hover:bg-gray-50 cursor-pointer"
+                  onClick={() => setSelected(j)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold truncate">{orderLabel(j)}</p>
+                      <p className="text-xs text-gray-600 mt-1">
+                        {fmtDateTime(j.created_at)} · {j.order_id.slice(0, 8)}
+                      </p>
+
+                      <p className="text-xs text-gray-600 mt-2 truncate">Vendor: {vendorName}</p>
+                      <p className="text-xs text-gray-600 truncate">Vendor phone: {vendorPhone}</p>
+                      <p className="text-xs text-gray-600 truncate">Vendor address: {vendorAddress}</p>
+
+                      <p className="text-xs text-gray-600 mt-2 truncate">Customer: {customerName}</p>
+                      <p className="text-xs text-gray-600 truncate">Customer phone: {customerPhone}</p>
+
+                      <p className="text-xs text-gray-600 mt-2 truncate">Delivery: {deliveryAddress}</p>
+                    </div>
+
+                    <div className="text-right">
+                      <p className="font-semibold">{naira(gross)}</p>
+                      <p className="text-xs text-gray-600 mt-1">{j.status}</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {selected ? (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-3">
+          <div className="w-full max-w-xl rounded-2xl bg-white border p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-base font-semibold">Delivery details</p>
+                <p className="text-xs text-gray-600 mt-1">
+                  Job {selected.id.slice(0, 8)} · Status {selected.status}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="rounded-xl border px-3 py-2 text-sm"
+                onClick={() => setSelected(null)}
+                disabled={saving}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <div className="rounded-xl border p-3">
+                <p className="text-xs text-gray-600">Order</p>
+                <p className="text-sm">{orderLabel(selected)}</p>
+                <p className="text-sm font-semibold mt-1">{naira(safeNumber(selected.order_total, 0))}</p>
+              </div>
+
+              <div className="rounded-xl border p-3">
+                <p className="text-xs text-gray-600">Vendor</p>
+                <p className="text-sm">{cleanText(selected.vendor_name) ? selected.vendor_name : "Vendor"}</p>
+                <p className="text-sm mt-1">Phone: {cleanText(selected.vendor_phone) ? selected.vendor_phone : "No vendor phone"}</p>
+                <p className="text-sm mt-1">Address: {cleanText(selected.vendor_address) ? selected.vendor_address : "No vendor address"}</p>
+              </div>
+
+              <div className="rounded-xl border p-3">
+                <p className="text-xs text-gray-600">Customer</p>
+                <p className="text-sm">{cleanText(selected.customer_name) ? selected.customer_name : "Customer"}</p>
+                <p className="text-sm mt-1">Phone: {cleanText(selected.customer_phone) ? selected.customer_phone : "No customer phone"}</p>
+                <p className="text-sm mt-1">Delivery address: {cleanText(selected.delivery_address) ? selected.delivery_address : "No delivery address"}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className="rounded-xl bg-black text-white px-4 py-3 text-sm disabled:opacity-50"
+                disabled={saving || selected.status !== "pending_pickup"}
+                onClick={() => setJobStatus(selected, "picked_up")}
+              >
+                Mark picked up
+              </button>
+
+              <button
+                type="button"
+                className="rounded-xl border px-4 py-3 text-sm disabled:opacity-50"
+                disabled={saving || selected.status !== "picked_up"}
+                onClick={() => setJobStatus(selected, "delivered")}
+              >
+                Mark delivered
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </main>
+  );
+}

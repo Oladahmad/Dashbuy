@@ -1,0 +1,169 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
+import { supabase } from "@/lib/supabaseClient";
+
+type Role = "customer" | "vendor_food" | "vendor_products" | "logistics" | "admin";
+
+export default function LoginPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+
+  const modeParam = useMemo(() => sp.get("mode") || "user", [sp]);
+  const [mode, setMode] = useState<"user" | "vendor">(modeParam === "vendor" ? "vendor" : "user");
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function onSignIn() {
+    setLoading(true);
+    setMsg(null);
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password: password.trim(),
+    });
+
+    if (error) {
+      setLoading(false);
+      setMsg(error.message);
+      return;
+    }
+
+    const userId = data.user?.id;
+    if (!userId) {
+      setLoading(false);
+      setMsg("Could not read user id after sign in.");
+      return;
+    }
+
+    const { data: profile, error: pErr } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", userId)
+      .maybeSingle<{ role: Role }>();
+
+    if (pErr) {
+      setLoading(false);
+      setMsg(`Profile error: ${pErr.message}`);
+      return;
+    }
+
+    const role: Role = (profile?.role ?? "customer") as Role;
+
+    // Logistics always goes to logistics dashboard
+    if (role === "logistics") {
+      router.replace("/logistics");
+      return;
+    }
+
+    // Vendor mode: only vendors and admin can enter vendor area
+    if (mode === "vendor") {
+      const isVendor = role === "vendor_food" || role === "vendor_products" || role === "admin";
+      if (!isVendor) {
+        setLoading(false);
+        setMsg("This account is not a vendor. Switch to User mode.");
+        await supabase.auth.signOut();
+        return;
+      }
+      router.replace("/vendor");
+      return;
+    }
+
+    // User mode: customers go home, admin can also go vendor
+    if (role === "admin") {
+      router.replace("/vendor");
+      return;
+    }
+
+    router.replace("/");
+  }
+
+  return (
+    <main className="min-h-screen bg-white flex items-center justify-center p-6">
+      <div className="w-full max-w-md rounded-2xl border bg-white p-6">
+        <div className="flex items-center justify-center">
+          <Image src="/logo.png" alt="Dashbuy" width={64} height={64} className="h-16 w-auto" />
+        </div>
+
+        <h1 className="mt-4 text-center text-2xl font-bold">Sign in</h1>
+        <p className="mt-1 text-center text-sm text-gray-600">Select user or vendor mode, then sign in.</p>
+
+        <div className="mt-5 grid grid-cols-2 gap-2 rounded-xl border p-1">
+          <button
+            className={`rounded-lg px-3 py-2 text-sm ${mode === "user" ? "bg-black text-white" : "bg-white"}`}
+            onClick={() => setMode("user")}
+            type="button"
+          >
+            User
+          </button>
+          <button
+            className={`rounded-lg px-3 py-2 text-sm ${mode === "vendor" ? "bg-black text-white" : "bg-white"}`}
+            onClick={() => setMode("vendor")}
+            type="button"
+          >
+            Vendor
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          <div>
+            <label className="text-sm font-medium">Email</label>
+            <input
+              className="mt-1 w-full rounded-xl border px-3 py-2 outline-none"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              type="email"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium">Password</label>
+            <div className="mt-1 flex items-center gap-2 rounded-xl border px-3 py-2">
+              <input
+                className="w-full outline-none"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter password"
+                type={showPw ? "text" : "password"}
+              />
+              <button
+                type="button"
+                className="text-sm text-gray-600"
+                onClick={() => setShowPw((v) => !v)}
+              >
+                {showPw ? "Hide" : "Show"}
+              </button>
+            </div>
+          </div>
+
+          {msg ? <p className="text-sm text-red-600">{msg}</p> : null}
+
+          <button
+            className="w-full rounded-xl bg-black px-4 py-3 text-white disabled:opacity-60"
+            onClick={onSignIn}
+            disabled={loading || !email || !password}
+          >
+            {loading ? "Signing in..." : "Sign in"}
+          </button>
+
+          <div className="flex items-center justify-between text-sm">
+            <a className="underline" href="/auth/signup">
+              Create account
+            </a>
+            <a className="underline" href="/auth/vendor-signup">
+              Vendor signup
+            </a>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
