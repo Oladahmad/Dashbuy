@@ -11,7 +11,7 @@ type AppShellProps = {
 };
 
 const PRODUCTS_CART_KEY = "dashbuy_products_cart_v1";
-const FOOD_CART_KEYS = ["dashbuy_food_cart_v1", "dashbuy_food_cart", "dashbuy_cart_v1"];
+const FOOD_CART_KEYS = ["dashbuy_food_cart_v1", "dashbuy_combo_cart_v1", "dashbuy_food_cart", "dashbuy_cart_v1"];
 
 function safeParse(raw: string | null): unknown {
   if (!raw) return null;
