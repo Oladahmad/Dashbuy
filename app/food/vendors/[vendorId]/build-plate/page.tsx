@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
-type Vendor = { id: string; name: string };
+type Vendor = {
+  id: string;
+  store_name: string | null;
+  full_name: string | null;
+};
 type Plate = { id: string; name: string; plate_fee: number };
 
 type FoodItem = {
@@ -53,6 +57,14 @@ type CartPlate = {
 
 const CART_KEY = "dashbuy_food_cart_v1";
 
+function vendorDisplayName(v: Vendor | null) {
+  const store = (v?.store_name || "").trim();
+  if (store) return store;
+  const full = (v?.full_name || "").trim();
+  if (full) return full;
+  return "Vendor";
+}
+
 function formatNaira(n: number) {
   return `₦${Math.round(n).toLocaleString()}`;
 }
@@ -96,29 +108,41 @@ export default function BuildPlatePage() {
 
   useEffect(() => {
     (async () => {
-      if (!plateId) {
-        setMsg("Missing plateId. Go back and choose a plate.");
-        return;
-      }
-
       // vendor
       const { data: v, error: vErr } = await supabase
-        .from("vendors")
-        .select("id,name")
+        .from("profiles")
+        .select("id,store_name,full_name")
         .eq("id", vendorId)
-        .single();
+        .maybeSingle<Vendor>();
       if (vErr || !v) {
         setMsg("Vendor not found");
         return;
       }
       setVendor(v);
 
+      let effectivePlateId = plateId;
+      if (!effectivePlateId) {
+        const { data: defaults, error: dErr } = await supabase
+          .from("plate_templates")
+          .select("id")
+          .eq("is_active", true)
+          .order("plate_fee", { ascending: true })
+          .limit(1);
+
+        if (dErr || !defaults || defaults.length === 0) {
+          setMsg("No plate template available yet.");
+          return;
+        }
+
+        effectivePlateId = defaults[0].id as string;
+        router.replace(`/food/vendors/${vendorId}/build-plate?plateId=${effectivePlateId}`);
+      }
+
       // plate
       const { data: p, error: pErr } = await supabase
         .from("plate_templates")
         .select("id,name,plate_fee")
-        .eq("id", plateId)
-        .eq("vendor_id", vendorId)
+        .eq("id", effectivePlateId)
         .single();
 
       if (pErr || !p) {
@@ -267,7 +291,7 @@ export default function BuildPlatePage() {
 
     const newPlate: CartPlate = {
       vendorId: vendor.id,
-      vendorName: vendor.name,
+      vendorName: vendorDisplayName(vendor),
       plateTemplateId: plate.id,
       plateName: plate.name,
       plateFee,
@@ -290,7 +314,7 @@ export default function BuildPlatePage() {
       </button>
 
       <h1 className="mt-3 text-2xl font-bold">
-        Build Plate — {vendor?.name}
+        Build Plate — {vendorDisplayName(vendor)}
       </h1>
 
       <div className="mt-3 rounded border p-4">

@@ -3,8 +3,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-type Vendor = { id: string; name: string };
-
 type Plate = {
   id: string;
   name: string;
@@ -13,7 +11,6 @@ type Plate = {
 };
 
 export default function VendorPlatesPage() {
-  const [vendor, setVendor] = useState<Vendor | null>(null);
   const [plates, setPlates] = useState<Plate[]>([]);
   const [msg, setMsg] = useState("Loading...");
 
@@ -25,29 +22,14 @@ export default function VendorPlatesPage() {
 
     const { data: sessionData } = await supabase.auth.getSession();
     const userId = sessionData.session?.user?.id;
-
     if (!userId) {
       setMsg("Please login first at /auth");
       return;
     }
 
-    const { data: v, error: vErr } = await supabase
-      .from("vendors")
-      .select("id,name")
-      .eq("owner_id", userId)
-      .single();
-
-    if (vErr || !v) {
-      setMsg("No vendor profile found. Go and create vendor profile");
-      return;
-    }
-
-    setVendor(v);
-
     const { data: p, error: pErr } = await supabase
       .from("plate_templates")
       .select("id,name,plate_fee,is_active")
-      .eq("vendor_id", v.id)
       .order("plate_fee", { ascending: true });
 
     if (pErr) {
@@ -65,8 +47,6 @@ export default function VendorPlatesPage() {
   }, []);
 
   async function addPlate() {
-    if (!vendor) return;
-
     if (!name.trim()) {
       setMsg("Plate name is required");
       return;
@@ -75,7 +55,6 @@ export default function VendorPlatesPage() {
     setMsg("Saving...");
 
     const { error } = await supabase.from("plate_templates").insert({
-      vendor_id: vendor.id,
       name: name.trim(),
       plate_fee: fee,
       is_active: true,
@@ -112,12 +91,6 @@ export default function VendorPlatesPage() {
     <main className="p-6 max-w-2xl">
       <h1 className="text-2xl font-bold">Plate Templates</h1>
 
-      {vendor && (
-        <p className="mt-1 text-sm text-gray-600">
-          Vendor: <strong>{vendor.name}</strong>
-        </p>
-      )}
-
       {msg && <p className="mt-3 text-sm">{msg}</p>}
 
       <section className="mt-6 rounded border p-4">
@@ -149,7 +122,7 @@ export default function VendorPlatesPage() {
       </section>
 
       <section className="mt-6">
-        <h2 className="font-semibold">Your plates</h2>
+        <h2 className="font-semibold">Available plates</h2>
 
         {plates.length === 0 ? (
           <p className="mt-2 text-gray-600">No plates yet.</p>

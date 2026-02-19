@@ -8,6 +8,14 @@ type AcceptBody = {
 type OrderMini = {
   id: string;
   vendor_id: string;
+  customer_id: string;
+  order_type: string | null;
+  food_mode: string | null;
+  total: number | null;
+  total_amount: number | null;
+  delivery_address: string | null;
+  customer_phone: string | null;
+  notes: string | null;
   status: string | null;
 };
 
@@ -65,7 +73,9 @@ export async function POST(req: Request) {
 
     const { data: order, error: orderErr } = await a
       .from("orders")
-      .select("id,vendor_id,status")
+      .select(
+        "id,vendor_id,customer_id,order_type,food_mode,total,total_amount,delivery_address,customer_phone,notes,status"
+      )
       .eq("id", orderId)
       .maybeSingle<OrderMini>();
 
@@ -85,13 +95,70 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Order is not pending_vendor" }, { status: 400 });
     }
 
-    const { data: jobData, error: jobErr } = await a.rpc("create_logistics_job_snapshot", {
-      p_order_id: orderId,
-    });
+    const { data: vendorProfile, error: vErr } = await a
+      .from("profiles")
+      .select("store_name,full_name,phone,store_address,address")
+      .eq("id", vendorId)
+      .maybeSingle();
+
+    if (vErr) {
+      return NextResponse.json(
+        { ok: false, error: "Vendor profile error: " + vErr.message },
+        { status: 500 }
+      );
+    }
+
+    const { data: customerProfile, error: cErr } = await a
+      .from("profiles")
+      .select("full_name")
+      .eq("id", order.customer_id)
+      .maybeSingle();
+
+    if (cErr) {
+      return NextResponse.json(
+        { ok: false, error: "Customer profile error: " + cErr.message },
+        { status: 500 }
+      );
+    }
+
+    const vendorName =
+      String(vendorProfile?.store_name ?? "").trim() ||
+      String(vendorProfile?.full_name ?? "").trim() ||
+      "Vendor";
+    const vendorPhone = String(vendorProfile?.phone ?? "").trim();
+    const vendorAddress =
+      String(vendorProfile?.store_address ?? "").trim() ||
+      String(vendorProfile?.address ?? "").trim();
+    const customerName = String(customerProfile?.full_name ?? "Customer").trim() || "Customer";
+
+    const gross = Number(order.total_amount ?? order.total ?? 0);
+
+    const { data: jobData, error: jobErr } = await a
+      .from("logistics_jobs")
+      .upsert(
+        {
+          order_id: order.id,
+          vendor_id: vendorId,
+          customer_id: order.customer_id,
+          status: "pending_pickup",
+          vendor_name: vendorName,
+          vendor_phone: vendorPhone || null,
+          vendor_address: vendorAddress || null,
+          customer_name: customerName,
+          customer_phone: order.customer_phone || null,
+          delivery_address: order.delivery_address || null,
+          order_type: order.order_type,
+          food_mode: order.food_mode,
+          order_total: Number.isFinite(gross) ? gross : 0,
+        },
+        { onConflict: "order_id" }
+      )
+      .select("id")
+      .maybeSingle();
 
     if (jobErr) {
       return NextResponse.json(
-        { ok: false, error: "Create job error: " + jobErr.message },
+        { ok: false, error: "Create logistics job error: " + jobErr.message },
         { status: 500 }
       );
     }
@@ -110,7 +177,7 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ ok: true, jobId: jobData ?? null, order: updated });
+    return NextResponse.json({ ok: true, jobId: jobData?.id ?? null, order: updated });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Server error";
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });

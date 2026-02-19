@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
+import { formatAuthError, formatProfileSaveError } from "@/lib/authError";
 
 export default function UserSignupPage() {
   const router = useRouter();
@@ -22,7 +23,7 @@ export default function UserSignupPage() {
     setLoading(true);
     setMsg(null);
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -38,7 +39,31 @@ export default function UserSignupPage() {
     setLoading(false);
 
     if (error) {
-      setMsg(error.message);
+      setMsg(formatAuthError(error.message));
+      return;
+    }
+
+    const userId = data.user?.id;
+    if (!userId) {
+      setMsg("Signup succeeded but user id was not returned. Try signing in after verify.");
+      return;
+    }
+
+    const res = await fetch("/api/auth/ensure-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        role: "customer",
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+      }),
+    });
+
+    const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!res.ok || !json?.ok) {
+      setMsg(formatProfileSaveError(json?.error));
       return;
     }
 

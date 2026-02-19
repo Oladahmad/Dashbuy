@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
+import { formatAuthError, formatProfileSaveError } from "@/lib/authError";
 
 export default function FoodVendorSignupPage() {
   const router = useRouter();
@@ -50,7 +51,7 @@ export default function FoodVendorSignupPage() {
 
     if (error) {
       setLoading(false);
-      setMsg(error.message);
+      setMsg(formatAuthError(error.message));
       return;
     }
 
@@ -61,21 +62,27 @@ export default function FoodVendorSignupPage() {
       return;
     }
 
-    const { error: upsertErr } = await supabase.from("profiles").upsert(
-      {
-        id: userId,
+    const res = await fetch("/api/auth/ensure-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
         role: "vendor_food",
-        full_name: storeName.trim(),
+        vendorCategory: "food",
+        fullName: storeName.trim(),
         phone: storePhone.trim(),
-        default_address: storeAddress.trim(),
-      },
-      { onConflict: "id" }
-    );
+        address: storeAddress.trim(),
+        storeName: storeName.trim(),
+        storeAddress: storeAddress.trim(),
+      }),
+    });
+
+    const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
 
     setLoading(false);
 
-    if (upsertErr) {
-      setMsg(`Created auth user but could not save vendor profile: ${upsertErr.message}`);
+    if (!res.ok || !json?.ok) {
+      setMsg(formatProfileSaveError(json?.error));
       return;
     }
 

@@ -56,14 +56,50 @@ function computeVendorNet(gross: number) {
   return Math.max(0, gross - fee);
 }
 
+function isPendingPaymentStatus(status: string | null) {
+  return (status ?? "").toLowerCase() === "pending_payment";
+}
+
+function isPaidStatus(status: string | null) {
+  const s = (status ?? "").toLowerCase();
+  return !["pending_payment", "rejected", "declined", "cancelled", "refunded"].includes(s);
+}
+
 function labelForOrder(o: OrderRow) {
-  if (o.order_type === "product") return "Products";
-  if ((o.food_mode ?? "plate") === "combo") return "Food combo";
-  return "Food plate";
+  if (o.order_type === "product") return "Product Order";
+  if ((o.food_mode ?? "plate") === "combo") return "Food Combo Order";
+  return "Food Plate Order";
+}
+
+function typeForOrder(o: OrderRow) {
+  if (o.order_type === "product") return "Type: Products";
+  if ((o.food_mode ?? "plate") === "combo") return "Type: Food - Combo";
+  return "Type: Food - Plate";
+}
+
+function friendlyStatus(status: string | null) {
+  const s = (status ?? "").toLowerCase();
+  if (s === "pending_vendor") return "Paid - waiting your confirmation";
+  if (s === "accepted") return "Accepted by vendor";
+  if (s === "rejected" || s === "declined") return "Declined";
+  if (s === "picked_up") return "Picked up by rider";
+  if (s === "pending_pickup") return "Waiting rider pickup";
+  if (s === "delivered") return "Delivered";
+  if (s === "cancelled") return "Cancelled";
+  if (s === "refunded") return "Refunded";
+  return status ?? "Unknown";
 }
 
 function isSettledStatus(status: string | null) {
   return status === "delivered";
+}
+
+function settlementStage(status: string | null) {
+  const s = (status ?? "").toLowerCase();
+  if (s === "delivered") return "Delivered and settled";
+  if (s === "pending_vendor") return "Pending your confirmation";
+  if (s === "accepted" || s === "pending_pickup" || s === "picked_up") return "Await logistics confirmation";
+  return "Not settled";
 }
 
 export default function VendorOrdersPage() {
@@ -125,26 +161,31 @@ export default function VendorOrdersPage() {
     };
   }, []);
 
+  const payableOrders = useMemo(() => {
+    return orders.filter((o) => !isPendingPaymentStatus(o.status));
+  }, [orders]);
+
+  const unpaidCount = useMemo(() => {
+    return orders.length - payableOrders.length;
+  }, [orders.length, payableOrders.length]);
+
   const filtered = useMemo(() => {
-    return orders.filter((o) => {
+    return payableOrders.filter((o) => {
       if (statusFilter === "all") return true;
       return (o.status ?? "") === statusFilter;
     });
-  }, [orders, statusFilter]);
+  }, [payableOrders, statusFilter]);
 
   const stats = useMemo(() => {
-    const grossAll = filtered.reduce((s, o) => s + computeGross(o), 0);
-
     const deliveredOnly = filtered.filter((o) => isSettledStatus(o.status));
-    const deliveredGross = deliveredOnly.reduce((s, o) => s + computeGross(o), 0);
-    const deliveredFee = deliveredOnly.reduce((s, o) => s + computePlatformFee(computeGross(o)), 0);
     const deliveredNet = deliveredOnly.reduce((s, o) => s + computeVendorNet(computeGross(o)), 0);
+    const pendingConfirmationNet = filtered
+      .filter((o) => isPaidStatus(o.status) && !isSettledStatus(o.status))
+      .reduce((s, o) => s + computeVendorNet(computeGross(o)), 0);
 
     return {
       count: filtered.length,
-      grossAll,
-      deliveredGross,
-      deliveredFee,
+      pendingConfirmationNet,
       deliveredNet,
     };
   }, [filtered]);
@@ -155,20 +196,15 @@ export default function VendorOrdersPage() {
         <p className="text-sm text-gray-600">Orders</p>
         <p className="text-base font-semibold">Your customer orders</p>
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-3 gap-2">
           <div className="rounded-xl border p-3">
             <p className="text-xs text-gray-600">Orders</p>
             <p className="text-lg font-semibold">{stats.count}</p>
           </div>
 
           <div className="rounded-xl border p-3">
-            <p className="text-xs text-gray-600">Gross total</p>
-            <p className="text-lg font-semibold">{formatNaira(stats.grossAll)}</p>
-          </div>
-
-          <div className="rounded-xl border p-3">
-            <p className="text-xs text-gray-600">Platform fee settled</p>
-            <p className="text-lg font-semibold">{formatNaira(stats.deliveredFee)}</p>
+            <p className="text-xs text-gray-600">Pending confirmation</p>
+            <p className="text-lg font-semibold">{formatNaira(stats.pendingConfirmationNet)}</p>
           </div>
 
           <div className="rounded-xl border p-3">
@@ -185,7 +221,6 @@ export default function VendorOrdersPage() {
             onChange={(e) => setStatusFilter(e.target.value)}
           >
             <option value="all">All</option>
-            <option value="pending_payment">Pending payment</option>
             <option value="pending_vendor">Pending vendor</option>
             <option value="accepted">Accepted</option>
             <option value="rejected">Rejected</option>
@@ -197,8 +232,11 @@ export default function VendorOrdersPage() {
         </div>
 
         <p className="mt-2 text-xs text-gray-600">
-          Vendor revenue only increases after delivered.
+          Pending confirmation helps prevent scams until logistics confirms delivery.
         </p>
+        {unpaidCount > 0 ? (
+          <p className="mt-1 text-xs text-gray-600">{unpaidCount} order(s) still awaiting customer payment.</p>
+        ) : null}
       </div>
 
       {err ? <div className="rounded-2xl border bg-white p-4 text-sm text-red-600">{err}</div> : null}
@@ -224,15 +262,16 @@ export default function VendorOrdersPage() {
                     <div className="min-w-0">
                       <p className="font-semibold truncate">{labelForOrder(o)}</p>
                       <p className="text-xs text-gray-600 mt-1">
-                        {formatDateTime(o.created_at)} · {o.status ?? "unknown"}
+                        {formatDateTime(o.created_at)} · {friendlyStatus(o.status)}
                       </p>
+                      <p className="text-xs text-gray-500 mt-1">{typeForOrder(o)}</p>
                     </div>
 
                     <div className="text-right">
                       <p className="font-semibold">
-                        {isSettledStatus(o.status) ? formatNaira(netIfDelivered) : "Not settled"}
+                        {isSettledStatus(o.status) ? formatNaira(netIfDelivered) : "Pending confirmation"}
                       </p>
-                      <p className="text-xs text-gray-600">gross {formatNaira(gross)}</p>
+                      <p className="text-xs text-gray-600">{settlementStage(o.status)}</p>
                     </div>
                   </div>
 

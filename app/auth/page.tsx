@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
+import { formatAuthError } from "@/lib/authError";
 
 export default function VendorSignupPage() {
   const router = useRouter();
@@ -28,7 +29,7 @@ export default function VendorSignupPage() {
 
     const role = vendorType === "food" ? "vendor_food" : "vendor_products";
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -46,8 +47,26 @@ export default function VendorSignupPage() {
     setLoading(false);
 
     if (error) {
-      setMsg(error.message);
+      setMsg(formatAuthError(error.message));
       return;
+    }
+
+    const userId = data.user?.id;
+    if (userId) {
+      await fetch("/api/auth/ensure-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          role,
+          vendorCategory: vendorType,
+          fullName: fullName.trim() || storeName.trim(),
+          phone: phone.trim(),
+          address: storeAddress.trim(),
+          storeName: storeName.trim(),
+          storeAddress: storeAddress.trim(),
+        }),
+      });
     }
 
     setMsg("Vendor account created. Verify email, then sign in as vendor.");

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
-const CART_KEY = "dashbuy_product_cart_v1";
+const CART_KEY = "dashbuy_products_cart_v1";
 const DELIVERY_FEE = 700;
 
 type ProductCartItem = {
@@ -25,10 +25,15 @@ function readCart(): { vendorId: string | null; items: ProductCartItem[] } {
   try {
     const raw = localStorage.getItem(CART_KEY);
     if (!raw) return { vendorId: null, items: [] };
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as {
+      vendorId?: string | null;
+      items?: ProductCartItem[];
+    };
+    const items = Array.isArray(parsed.items) ? parsed.items : [];
+    const vendorId = parsed.vendorId ?? items[0]?.vendorId ?? null;
     return {
-      vendorId: parsed.vendorId ?? null,
-      items: Array.isArray(parsed.items) ? parsed.items : [],
+      vendorId,
+      items,
     };
   } catch {
     return { vendorId: null, items: [] };
@@ -159,28 +164,10 @@ export default function ProductCheckoutPage() {
       return;
     }
 
-    const snapRes = await fetch("/api/logistics/precreate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        orderId: order.id,
-        customerAddress: addr,
-        customerPhone: phoneClean,
-        customerNotes: notes.trim() ? notes.trim() : null,
-      }),
-    });
-
-    const snapJson = await snapRes.json();
-    if (!snapRes.ok || !snapJson?.ok) {
-      setLoading(false);
-      setMsg(snapJson?.error ?? "Failed to create logistics job snapshot");
-      return;
-    }
-
     localStorage.removeItem(CART_KEY);
 
     setLoading(false);
-    router.push(`/product/pay?orderId=${order.id}`);
+    router.push(`/food/pay?orderId=${order.id}`);
   }
 
   if (loading) return <main className="p-6">Loading...</main>;

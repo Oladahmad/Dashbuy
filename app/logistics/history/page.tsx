@@ -26,6 +26,7 @@ type LogisticsJobRow = {
   order_type: string | null;
   food_mode: string | null;
   order_total: number | null;
+  customer_note?: string | null;
 };
 
 function cleanText(s: string | null | undefined) {
@@ -127,7 +128,32 @@ export default function HistoryPage() {
         return;
       }
 
-      setJobs((data ?? []) as LogisticsJobRow[]);
+      const rows = (data ?? []) as LogisticsJobRow[];
+
+      const orderIds = Array.from(
+        new Set(rows.map((r) => cleanText(r.order_id)).filter((x) => x.length > 0))
+      );
+
+      const orderNoteMap = new Map<string, string>();
+      if (orderIds.length > 0) {
+        const { data: orderRows, error: orderErr } = await supabase
+          .from("orders")
+          .select("id,notes")
+          .in("id", orderIds);
+
+        if (!orderErr && orderRows) {
+          for (const o of orderRows as Array<{ id: string; notes: string | null }>) {
+            orderNoteMap.set(o.id, cleanText(o.notes));
+          }
+        }
+      }
+
+      setJobs(
+        rows.map((r) => ({
+          ...r,
+          customer_note: orderNoteMap.get(r.order_id) || null,
+        }))
+      );
       setLoading(false);
     }
 
@@ -206,6 +232,7 @@ export default function HistoryPage() {
             {filtered.map((j) => {
               const vendorName = cleanText(j.vendor_name) ? j.vendor_name : "Vendor";
               const deliveryAddress = cleanText(j.delivery_address) ? j.delivery_address : "No delivery address";
+              const customerNote = cleanText(j.customer_note) ? j.customer_note : null;
               const gross = safeNumber(j.order_total, 0);
 
               return (
@@ -223,6 +250,7 @@ export default function HistoryPage() {
                       </p>
                       <p className="text-xs text-gray-600 mt-2 truncate">Vendor: {vendorName}</p>
                       <p className="text-xs text-gray-600 truncate">Delivery: {deliveryAddress}</p>
+                      {customerNote ? <p className="text-xs text-gray-600 truncate">Note: {customerNote}</p> : null}
                     </div>
 
                     <div className="text-right">

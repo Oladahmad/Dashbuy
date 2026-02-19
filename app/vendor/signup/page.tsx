@@ -4,6 +4,7 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { formatAuthError } from "@/lib/authError";
 
 type VendorRole = "vendor_food" | "vendor_products";
 
@@ -39,7 +40,7 @@ export default function VendorSignupPage() {
     });
 
     if (error) {
-      setMsg(error.message);
+      setMsg(formatAuthError(error.message));
       setLoading(false);
       return;
     }
@@ -47,9 +48,44 @@ export default function VendorSignupPage() {
     const session = data.session;
 
     if (!session) {
+      const userId = data.user?.id;
+      if (userId) {
+        await fetch("/api/auth/ensure-profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            role,
+            vendorCategory: role === "vendor_food" ? "food" : "products",
+            fullName: storeName.trim(),
+            phone: storePhone.trim(),
+            address: storeAddress.trim(),
+            storeName: storeName.trim(),
+            storeAddress: storeAddress.trim(),
+          }),
+        });
+      }
       setMsg("Vendor account created. Please verify your email, then sign in as vendor.");
       setLoading(false);
       return;
+    }
+
+    const userId = data.user?.id;
+    if (userId) {
+      await fetch("/api/auth/ensure-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          role,
+          vendorCategory: role === "vendor_food" ? "food" : "products",
+          fullName: storeName.trim(),
+          phone: storePhone.trim(),
+          address: storeAddress.trim(),
+          storeName: storeName.trim(),
+          storeAddress: storeAddress.trim(),
+        }),
+      });
     }
 
     router.push("/vendor");

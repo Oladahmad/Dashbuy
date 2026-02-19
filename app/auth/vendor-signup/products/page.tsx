@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import Image from "next/image";
+import { formatAuthError, formatProfileSaveError } from "@/lib/authError";
 
 export default function ProductVendorSignupPage() {
   const router = useRouter();
@@ -37,7 +38,7 @@ export default function ProductVendorSignupPage() {
 
     const emailRedirectTo = `${window.location.origin}/auth/login?verified=1`;
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password: password.trim(),
       options: {
@@ -54,7 +55,34 @@ export default function ProductVendorSignupPage() {
     setLoading(false);
 
     if (error) {
-      setMsg(error.message);
+      setMsg(formatAuthError(error.message));
+      return;
+    }
+
+    const userId = data.user?.id;
+    if (!userId) {
+      setMsg("Signup succeeded but user id was not returned. Try signing in after verify.");
+      return;
+    }
+
+    const res = await fetch("/api/auth/ensure-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        role: "vendor_products",
+        vendorCategory: "products",
+        fullName: storeName.trim(),
+        phone: storePhone.trim(),
+        address: storeAddress.trim(),
+        storeName: storeName.trim(),
+        storeAddress: storeAddress.trim(),
+      }),
+    });
+
+    const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!res.ok || !json?.ok) {
+      setMsg(formatProfileSaveError(json?.error));
       return;
     }
 

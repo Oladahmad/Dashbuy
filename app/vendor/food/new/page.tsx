@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -12,6 +12,13 @@ type VariantDraft = {
   name: string;
   price: string;
   is_available: boolean;
+};
+
+type PlateTemplate = {
+  id: string;
+  name: string;
+  plate_fee: number;
+  is_active: boolean;
 };
 
 function clean(s: string) {
@@ -74,6 +81,11 @@ export default function VendorNewFoodPage() {
   const [variants, setVariants] = useState<VariantDraft[]>([
     { name: "", price: "", is_available: true },
   ]);
+  const [plates, setPlates] = useState<PlateTemplate[]>([]);
+  const [plateName, setPlateName] = useState("");
+  const [plateFee, setPlateFee] = useState("");
+  const [plateSaving, setPlateSaving] = useState(false);
+  const [plateMsg, setPlateMsg] = useState<string | null>(null);
 
   const showSingleFields = foodType === "single";
   const showComboFields = foodType === "combo";
@@ -125,6 +137,64 @@ export default function VendorNewFoodPage() {
 
     return false;
   }, [name, imageFile, foodType, pricingType, fixedPrice, stockQty, unitPrice, variants]);
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase
+        .from("plate_templates")
+        .select("id,name,plate_fee,is_active")
+        .eq("is_active", true)
+        .order("plate_fee", { ascending: true });
+
+      if (error) {
+        setPlateMsg("Could not load plates: " + error.message);
+        return;
+      }
+
+      setPlates((data as PlateTemplate[]) ?? []);
+    })();
+  }, []);
+
+  async function addPlateTemplate() {
+    setPlateMsg(null);
+
+    const n = clean(plateName);
+    const fee = toNumberOrNull(plateFee);
+
+    if (!n) {
+      setPlateMsg("Plate name is required.");
+      return;
+    }
+    if (fee === null || fee < 0) {
+      setPlateMsg("Enter a valid plate fee.");
+      return;
+    }
+
+    setPlateSaving(true);
+    const { error } = await supabase.from("plate_templates").insert({
+      name: n,
+      plate_fee: fee,
+      is_active: true,
+    });
+
+    if (error) {
+      setPlateSaving(false);
+      setPlateMsg("Plate error: " + error.message);
+      return;
+    }
+
+    const { data } = await supabase
+      .from("plate_templates")
+      .select("id,name,plate_fee,is_active")
+      .eq("is_active", true)
+      .order("plate_fee", { ascending: true });
+
+    setPlates((data as PlateTemplate[]) ?? []);
+    setPlateName("");
+    setPlateFee("");
+    setPlateSaving(false);
+    setPlateMsg("Plate added.");
+  }
 
   async function uploadFoodImage(file: File, vendorId: string) {
     const ext = fileExt(file.name);
@@ -319,6 +389,65 @@ export default function VendorNewFoodPage() {
       <div className="rounded-2xl border bg-white p-4">
         <p className="text-sm text-gray-600">Add new food</p>
         <p className="text-base font-semibold">Create single foods and combos</p>
+      </div>
+
+      <div className="rounded-2xl border bg-white p-4 sm:p-5 space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm text-gray-600">Plates</p>
+            <p className="text-base font-semibold">Add plate options for customers</p>
+          </div>
+          <button
+            type="button"
+            className="h-10 rounded-xl border px-4 text-sm font-medium self-start sm:self-auto"
+            onClick={() => router.push("/vendor/plates")}
+            disabled={saving || plateSaving}
+          >
+            Open plates page
+          </button>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <input
+            className="rounded-xl border px-3 py-3"
+            placeholder="Plate name (e.g. Standard)"
+            value={plateName}
+            onChange={(e) => setPlateName(e.target.value)}
+            disabled={plateSaving || saving}
+          />
+          <input
+            className="rounded-xl border px-3 py-3"
+            placeholder="Plate fee (e.g. 500)"
+            value={plateFee}
+            onChange={(e) => setPlateFee(e.target.value)}
+            inputMode="numeric"
+            disabled={plateSaving || saving}
+          />
+        </div>
+
+        <button
+          type="button"
+          className="w-full rounded-xl bg-black px-4 py-3 text-sm text-white disabled:opacity-60"
+          onClick={addPlateTemplate}
+          disabled={plateSaving || saving}
+        >
+          {plateSaving ? "Adding..." : "Add plate"}
+        </button>
+
+        {plateMsg ? <p className="text-sm text-gray-700">{plateMsg}</p> : null}
+
+        {plates.length === 0 ? (
+          <p className="text-xs text-gray-600">No plate yet.</p>
+        ) : (
+          <div className="grid gap-2">
+            {plates.slice(0, 5).map((p) => (
+              <div key={p.id} className="rounded-xl border p-3 text-sm flex items-center justify-between gap-3">
+                <span className="font-medium">{p.name}</span>
+                <strong>{Number(p.plate_fee || 0).toLocaleString()}</strong>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {err ? (

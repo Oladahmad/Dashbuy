@@ -94,6 +94,29 @@ function canVendorAct(status: string | null) {
   return status === "pending_vendor";
 }
 
+function friendlyStatus(status: string | null) {
+  const s = (status ?? "").toLowerCase();
+  if (s === "pending_payment") return "Awaiting customer payment";
+  if (s === "pending_vendor") return "Pending your confirmation";
+  if (s === "accepted") return "Accepted by vendor";
+  if (s === "pending_pickup") return "Waiting rider pickup";
+  if (s === "picked_up") return "Picked up by rider";
+  if (s === "delivered") return "Delivered";
+  if (s === "rejected" || s === "declined") return "Declined";
+  if (s === "cancelled") return "Cancelled";
+  if (s === "refunded") return "Refunded";
+  return status ?? "Unknown";
+}
+
+function settlementText(status: string | null) {
+  const s = (status ?? "").toLowerCase();
+  if (s === "delivered") return "Settled and withdrawable";
+  if (s === "pending_vendor") return "Pending your confirmation";
+  if (s === "accepted" || s === "pending_pickup" || s === "picked_up") return "Await logistics confirmation";
+  if (s === "pending_payment") return "Awaiting customer payment";
+  return "Not settled";
+}
+
 export default function VendorOrderDetailsPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id;
@@ -459,7 +482,8 @@ export default function VendorOrderDetailsPage() {
 
             <div className="rounded-xl border p-3">
               <p className="text-xs text-gray-600">Status</p>
-              <p className="text-base font-semibold">{order.status ?? "unknown"}</p>
+              <p className="text-base font-semibold">{friendlyStatus(order.status)}</p>
+              <p className="mt-1 text-xs text-gray-600">{settlementText(order.status)}</p>
             </div>
 
             {order.delivery_address ? (

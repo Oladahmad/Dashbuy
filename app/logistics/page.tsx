@@ -26,6 +26,7 @@ type LogisticsJobRow = {
   order_type: string | null;
   food_mode: string | null;
   order_total: number | null;
+  customer_note?: string | null;
 };
 
 type VendorProfile = {
@@ -33,6 +34,7 @@ type VendorProfile = {
   full_name: string | null;
   phone: string | null;
   address: string | null;
+  store_address: string | null;
   store_name: string | null;
 };
 
@@ -139,6 +141,28 @@ export default function LogisticsPage() {
 
       const rows = (data ?? []) as LogisticsJobRow[];
 
+      const orderIds = Array.from(
+        new Set(
+          rows
+            .map((r) => cleanText(r.order_id))
+            .filter((x) => x.length > 0)
+        )
+      );
+
+      const orderNoteMap = new Map<string, string>();
+      if (orderIds.length > 0) {
+        const { data: orderRows, error: orderErr } = await supabase
+          .from("orders")
+          .select("id,notes")
+          .in("id", orderIds);
+
+        if (!orderErr && orderRows) {
+          for (const o of orderRows as Array<{ id: string; notes: string | null }>) {
+            orderNoteMap.set(o.id, cleanText(o.notes));
+          }
+        }
+      }
+
       const vendorIds = Array.from(
         new Set(
           rows
@@ -152,7 +176,7 @@ export default function LogisticsPage() {
       if (vendorIds.length > 0) {
         const { data: vendors, error: vErr } = await supabase
           .from("profiles")
-          .select("id,full_name,phone,address,store_name")
+          .select("id,full_name,phone,address,store_address,store_name")
           .in("id", vendorIds);
 
         if (!vErr && vendors) {
@@ -178,6 +202,7 @@ export default function LogisticsPage() {
 
         const vendorAddress =
           cleanText(j.vendor_address) ||
+          cleanText(v?.store_address) ||
           cleanText(v?.address) ||
           "";
 
@@ -186,6 +211,7 @@ export default function LogisticsPage() {
           vendor_name: vendorName || null,
           vendor_phone: vendorPhone || null,
           vendor_address: vendorAddress || null,
+          customer_note: orderNoteMap.get(j.order_id) || null,
         };
       });
 
@@ -289,6 +315,7 @@ export default function LogisticsPage() {
               const customerName = cleanText(j.customer_name) ? j.customer_name : "Customer";
               const customerPhone = cleanText(j.customer_phone) ? j.customer_phone : "No customer phone";
               const deliveryAddress = cleanText(j.delivery_address) ? j.delivery_address : "No delivery address";
+              const customerNote = cleanText(j.customer_note) ? j.customer_note : null;
 
               return (
                 <button
@@ -312,6 +339,9 @@ export default function LogisticsPage() {
                       <p className="text-xs text-gray-600 truncate">Customer phone: {customerPhone}</p>
 
                       <p className="text-xs text-gray-600 mt-2 truncate">Delivery: {deliveryAddress}</p>
+                      {customerNote ? (
+                        <p className="text-xs text-gray-600 mt-1 truncate">Note: {customerNote}</p>
+                      ) : null}
                     </div>
 
                     <div className="text-right">
@@ -366,6 +396,9 @@ export default function LogisticsPage() {
                 <p className="text-sm">{cleanText(selected.customer_name) ? selected.customer_name : "Customer"}</p>
                 <p className="text-sm mt-1">Phone: {cleanText(selected.customer_phone) ? selected.customer_phone : "No customer phone"}</p>
                 <p className="text-sm mt-1">Delivery address: {cleanText(selected.delivery_address) ? selected.delivery_address : "No delivery address"}</p>
+                {cleanText(selected.customer_note) ? (
+                  <p className="text-sm mt-1">Note: {selected.customer_note}</p>
+                ) : null}
               </div>
             </div>
 

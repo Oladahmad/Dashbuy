@@ -94,50 +94,26 @@ export default function VendorMenuPage() {
         return;
       }
 
-      const { data: v, error: vErr } = await supabase
-        .from("profiles")
-        .select("id,store_name,full_name,store_address,address,phone,logo_url")
-        .eq("id", vendorId)
-        .maybeSingle<VendorProfile>();
+      const res = await fetch(`/api/catalog/food/vendor/${vendorId}`, { cache: "no-store" });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        vendor?: VendorProfile | null;
+        plates?: Plate[];
+        items?: FoodItem[];
+      };
 
-      if (vErr || !v) {
-        setMsg("Vendor not found");
-        return;
-      }
-
-      setVendor(v);
-
-      const { data: p, error: pErr } = await supabase
-        .from("plate_templates")
-        .select("id,name,plate_fee,is_active")
-        .eq("vendor_id", vendorId)
-        .eq("is_active", true)
-        .order("plate_fee", { ascending: true });
-
-      if (pErr) {
+      if (!res.ok || !body.ok || !body.vendor) {
+        setVendor(null);
         setPlates([]);
-      } else {
-        setPlates((p as Plate[]) ?? []);
-      }
-
-      const { data: it, error: itErr } = await supabase
-        .from("food_items")
-        .select(
-          "id,name,category,pricing_type,price,unit_label,unit_price,short_description,image_url,min_qty,max_qty,stock_qty,is_available"
-        )
-        .eq("vendor_id", vendorId)
-        .eq("food_type", "single")
-        .eq("is_available", true)
-        .order("category", { ascending: true })
-        .order("name", { ascending: true });
-
-      if (itErr) {
         setItems([]);
-        setMsg("Menu error: " + itErr.message);
+        setMsg(body.error ?? "Vendor not found");
         return;
       }
 
-      setItems((it as FoodItem[]) ?? []);
+      setVendor(body.vendor);
+      setPlates(Array.isArray(body.plates) ? body.plates : []);
+      setItems(Array.isArray(body.items) ? body.items : []);
       setMsg("");
     })();
   }, [vendorId]);
@@ -398,12 +374,18 @@ export default function VendorMenuPage() {
               ) : null}
 
               <div className="grid gap-2">
-                <a
-                  className="w-full rounded-xl bg-black px-4 py-3 text-white text-sm text-center"
-                  href={`/food/vendors/${vendorId}/build-plate`}
-                >
-                  Build a plate
-                </a>
+                {plates.length > 0 ? (
+                  <a
+                    className="w-full rounded-xl bg-black px-4 py-3 text-white text-sm text-center"
+                    href={`/food/vendors/${vendorId}/build-plate?plateId=${plates[0].id}`}
+                  >
+                    Build a plate
+                  </a>
+                ) : (
+                  <p className="w-full rounded-xl border px-4 py-3 text-sm text-center text-gray-600">
+                    No plate template yet for this vendor
+                  </p>
+                )}
 
                 <button
                   type="button"

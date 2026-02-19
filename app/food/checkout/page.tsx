@@ -27,105 +27,110 @@ type CartPlate = {
   createdAt: string;
 };
 
-const CART_KEY = "dashbuy_food_cart_v1";
+type ComboCartItem = {
+  comboId: string;
+  name: string;
+  price: number;
+  qty: number;
+  vendorId: string;
+  vendorName: string;
+};
+
+type FoodCart = {
+  vendorId: string | null;
+  plates: CartPlate[];
+  combos: ComboCartItem[];
+};
+
+const FOOD_CART_KEY = "dashbuy_food_cart_v1";
 const DELIVERY_FEE = 700;
 
 function formatNaira(n: number) {
-  return `₦${Math.round(n).toLocaleString()}`;
+  return `N${Math.round(n).toLocaleString()}`;
 }
 
-function readCart(): { vendorId: string | null; plates: CartPlate[] } {
-  if (typeof window === "undefined") return { vendorId: null, plates: [] };
+function readCart(): FoodCart {
+  if (typeof window === "undefined") return { vendorId: null, plates: [], combos: [] };
   try {
-    const raw = localStorage.getItem(CART_KEY);
-    if (!raw) return { vendorId: null, plates: [] };
-    const parsed = JSON.parse(raw);
+    const raw = localStorage.getItem(FOOD_CART_KEY);
+    if (!raw) return { vendorId: null, plates: [], combos: [] };
+    const parsed = JSON.parse(raw) as {
+      vendorId?: string | null;
+      plates?: CartPlate[];
+      combos?: ComboCartItem[];
+    };
     return {
       vendorId: parsed.vendorId ?? null,
       plates: Array.isArray(parsed.plates) ? parsed.plates : [],
+      combos: Array.isArray(parsed.combos) ? parsed.combos : [],
     };
   } catch {
-    return { vendorId: null, plates: [] };
+    return { vendorId: null, plates: [], combos: [] };
   }
 }
 
 export default function FoodCheckoutPage() {
   const router = useRouter();
-
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
-
   const [plates, setPlates] = useState<CartPlate[]>([]);
+  const [combos, setCombos] = useState<ComboCartItem[]>([]);
   const [vendorName, setVendorName] = useState("");
-
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
 
-  const subtotal = useMemo(() => plates.reduce((sum, p) => sum + Number(p.plateTotal), 0), [plates]);
+  const platesSubtotal = useMemo(() => plates.reduce((sum, p) => sum + Number(p.plateTotal), 0), [plates]);
+  const combosSubtotal = useMemo(() => combos.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0), [combos]);
+  const subtotal = platesSubtotal + combosSubtotal;
   const total = subtotal + DELIVERY_FEE;
 
   useEffect(() => {
     (async () => {
       const cart = readCart();
       setPlates(cart.plates);
-      setVendorName(cart.plates[0]?.vendorName ?? "");
+      setCombos(cart.combos);
+      setVendorName(cart.plates[0]?.vendorName ?? cart.combos[0]?.vendorName ?? "");
 
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData.session?.user?.id;
-
       if (!userId) {
         setMsg("Please login first at /auth");
         setLoading(false);
         return;
       }
-
       setLoading(false);
     })();
   }, []);
 
   async function placeOrder() {
     setMsg("");
-
-    if (plates.length === 0) {
-      setMsg("Your cart is empty.");
-      return;
-    }
+    if (plates.length === 0 && combos.length === 0) return setMsg("Your cart is empty.");
 
     const addr = deliveryAddress.trim();
-    if (!addr) {
-      setMsg("Enter delivery address.");
-      return;
-    }
-
+    if (!addr) return setMsg("Enter delivery address.");
     if (addr.length < 10) {
-      setMsg("Please include good address details for fast delivery, for example house number, street, area, landmark.");
-      return;
+      return setMsg("Please include house number, street, area and landmark for fast delivery.");
     }
 
     const phoneClean = phone.trim();
-    if (!phoneClean) {
-      setMsg("Enter your phone number.");
-      return;
-    }
+    if (!phoneClean) return setMsg("Enter your phone number.");
 
     const { data: sessionData } = await supabase.auth.getSession();
     const userId = sessionData.session?.user?.id;
+    if (!userId) return setMsg("Please login first at /auth");
 
-    if (!userId) {
-      setMsg("Please login first at /auth");
-      return;
-    }
-
-    const vendorId = plates[0].vendorId;
+    const vendorId = plates[0]?.vendorId ?? combos[0]?.vendorId;
+    if (!vendorId) return setMsg("Missing vendor. Add food items again.");
 
     setLoading(true);
 
+    const foodMode: "plate" | "combo" = plates.length > 0 ? "plate" : "combo";
     const { data: order, error: orderErr } = await supabase
       .from("orders")
       .insert({
         order_type: "food",
-        food_mode: "plate",
+        food_mode: foodMode,
         customer_id: userId,
         vendor_id: vendorId,
         status: "pending_payment",
@@ -173,7 +178,6 @@ export default function FoodCheckoutPage() {
       }));
 
       const { error: itemsErr } = await supabase.from("order_plate_items").insert(rows);
-
       if (itemsErr) {
         setLoading(false);
         setMsg("Plate items error: " + itemsErr.message);
@@ -181,42 +185,39 @@ export default function FoodCheckoutPage() {
       }
     }
 
-    const snapRes = await fetch("/api/logistics/precreate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        orderId: order.id,
-        customerAddress: addr,
-        customerPhone: phoneClean,
-        customerNotes: notes.trim() ? notes.trim() : null,
-      }),
-    });
-
-    const snapJson = await snapRes.json();
-    if (!snapRes.ok || !snapJson?.ok) {
-      setLoading(false);
-      setMsg(snapJson?.error ?? "Failed to create logistics job snapshot");
-      return;
+    if (combos.length > 0) {
+      const comboRows = combos.map((it) => ({
+        order_id: order.id,
+        combo_food_id: it.comboId,
+        qty: it.qty,
+        unit_price: it.price,
+        line_total: it.price * it.qty,
+      }));
+      const { error: comboErr } = await supabase.from("combo_order_items").insert(comboRows);
+      if (comboErr) {
+        setLoading(false);
+        setMsg("Combo items error: " + comboErr.message);
+        return;
+      }
     }
 
-    localStorage.removeItem(CART_KEY);
-
+    localStorage.removeItem(FOOD_CART_KEY);
     setLoading(false);
     router.push(`/food/pay?orderId=${order.id}`);
   }
 
   if (loading) return <main className="p-6">Loading...</main>;
+  const isEmpty = plates.length === 0 && combos.length === 0;
 
   return (
     <main className="p-6 max-w-3xl">
       <h1 className="text-2xl font-bold">Checkout</h1>
-
       {vendorName ? <p className="mt-2 text-gray-600">Vendor: {vendorName}</p> : null}
 
       <section className="mt-6 rounded border p-4">
-        <h2 className="font-semibold">Your plates</h2>
+        <h2 className="font-semibold">Order summary</h2>
 
-        {plates.length === 0 ? (
+        {isEmpty ? (
           <p className="mt-2 text-gray-600">Cart is empty.</p>
         ) : (
           <div className="mt-3 grid gap-2">
@@ -226,21 +227,26 @@ export default function FoodCheckoutPage() {
                 <span className="font-semibold">{formatNaira(Number(p.plateTotal))}</span>
               </div>
             ))}
+            {combos.map((c) => (
+              <div key={c.comboId} className="flex justify-between">
+                <span>
+                  {c.name} x {c.qty}
+                </span>
+                <span className="font-semibold">{formatNaira(Number(c.price) * Number(c.qty))}</span>
+              </div>
+            ))}
           </div>
         )}
 
         <hr className="my-3" />
-
         <div className="flex justify-between">
           <span>Subtotal</span>
           <span className="font-semibold">{formatNaira(subtotal)}</span>
         </div>
-
         <div className="flex justify-between">
           <span>Delivery fee</span>
           <span className="font-semibold">{formatNaira(DELIVERY_FEE)}</span>
         </div>
-
         <div className="mt-2 flex justify-between text-lg">
           <span>Total</span>
           <span className="font-semibold">{formatNaira(total)}</span>
@@ -249,12 +255,6 @@ export default function FoodCheckoutPage() {
 
       <section className="mt-6 rounded border p-4">
         <h2 className="font-semibold">Delivery details</h2>
-
-        <p className="mt-2 text-sm text-gray-600">
-          Please include good address details for fast delivery. Add house number, street, area, closest landmark, and
-          a phone number that will be reachable.
-        </p>
-
         <div className="mt-4 grid gap-3">
           <div>
             <label className="text-sm font-medium">Delivery address</label>
@@ -266,7 +266,6 @@ export default function FoodCheckoutPage() {
               onChange={(e) => setDeliveryAddress(e.target.value)}
             />
           </div>
-
           <div>
             <label className="text-sm font-medium">Phone number</label>
             <input
@@ -276,13 +275,12 @@ export default function FoodCheckoutPage() {
               onChange={(e) => setPhone(e.target.value)}
             />
           </div>
-
           <div>
             <label className="text-sm font-medium">Note</label>
             <textarea
               className="mt-1 w-full rounded border p-2"
               rows={3}
-              placeholder="Optional, for example call on arrival, gate code, directions"
+              placeholder="Optional delivery note"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
@@ -291,12 +289,7 @@ export default function FoodCheckoutPage() {
       </section>
 
       {msg ? <p className="mt-4 text-sm text-red-600">{msg}</p> : null}
-
-      <button
-        className="mt-6 w-full rounded bg-black px-4 py-3 text-white disabled:opacity-60"
-        onClick={placeOrder}
-        disabled={plates.length === 0 || loading}
-      >
+      <button className="mt-6 w-full rounded bg-black px-4 py-3 text-white disabled:opacity-60" onClick={placeOrder} disabled={isEmpty || loading}>
         Place order (payment next)
       </button>
     </main>

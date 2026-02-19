@@ -170,13 +170,6 @@ export default function ComboCheckoutPage() {
         return setMsg("Combo items error: " + itemsErr.message);
       }
 
-      await postJson<{ ok: boolean }>("/api/logistics/precreate", {
-  orderId: order.id,
-  deliveryAddress: addr,
-  customerPhone: phoneClean,
-});
-
-
       const initJson = await postJson<{ authorization_url: string }>("/api/paystack/init", {
         email: user.email,
         amountKobo: Math.round(total * 100),

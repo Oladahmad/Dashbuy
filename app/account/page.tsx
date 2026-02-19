@@ -42,9 +42,29 @@ function isBlank(s: string | null | undefined) {
 }
 
 function labelForOrder(o: OrderRow) {
-  if (o.order_type === "product") return "Products order";
-  if ((o.food_mode ?? "plate") === "combo") return "Food combo order";
-  return "Food plate order";
+  if (o.order_type === "product") return "Product Order";
+  if ((o.food_mode ?? "plate") === "combo") return "Food Combo Order";
+  return "Food Plate Order";
+}
+
+function typeForOrder(o: OrderRow) {
+  if (o.order_type === "product") return "Type: Products";
+  if ((o.food_mode ?? "plate") === "combo") return "Type: Food - Combo";
+  return "Type: Food - Plate";
+}
+
+function friendlyStatus(status: string | null) {
+  const s = (status ?? "").toLowerCase();
+  if (s === "pending_payment") return "Awaiting payment";
+  if (s === "pending_vendor") return "Paid - waiting vendor";
+  if (s === "accepted") return "Accepted";
+  if (s === "rejected" || s === "declined") return "Declined";
+  if (s === "picked_up") return "On delivery";
+  if (s === "pending_pickup") return "Rider pending pickup";
+  if (s === "delivered") return "Delivered";
+  if (s === "cancelled") return "Cancelled";
+  if (s === "refunded") return "Refunded";
+  return status ?? "Unknown";
 }
 
 export default function AccountPage() {
@@ -342,9 +362,10 @@ export default function AccountPage() {
                     </div>
 
                     <div className="mt-1 flex items-center justify-between text-sm text-gray-600">
-                      <span>Status: {o.status ?? "unknown"}</span>
+                      <span>{friendlyStatus(o.status)}</span>
                       <span>{fmtDate(o.created_at)}</span>
                     </div>
+                    <p className="mt-1 text-xs text-gray-500">{typeForOrder(o)}</p>
                   </button>
                 ))}
               </div>

@@ -27,6 +27,7 @@ type LogisticsJobRow = {
   order_type: string | null;
   food_mode: string | null;
   order_total: number | null;
+  customer_note?: string | null;
 };
 
 function cleanText(s: string | null | undefined) {
@@ -135,7 +136,19 @@ export default function HistoryDetailsPage() {
         return;
       }
 
-      setJob(data as LogisticsJobRow);
+      const row = data as LogisticsJobRow;
+
+      const { data: orderRow, error: orderErr } = await supabase
+        .from("orders")
+        .select("notes")
+        .eq("id", row.order_id)
+        .maybeSingle();
+
+      if (!orderErr && orderRow) {
+        row.customer_note = cleanText((orderRow as { notes: string | null }).notes) || null;
+      }
+
+      setJob(row);
       setLoading(false);
     }
 
@@ -239,6 +252,13 @@ export default function HistoryDetailsPage() {
                 {cleanText(job.delivery_address) ? job.delivery_address : "No delivery address"}
               </p>
             </div>
+
+            {cleanText(job.customer_note) ? (
+              <div className="rounded-xl border p-3">
+                <p className="text-xs text-gray-600">Customer note</p>
+                <p className="text-sm whitespace-pre-wrap">{job.customer_note}</p>
+              </div>
+            ) : null}
           </div>
         </>
       )}

@@ -35,7 +35,20 @@ function pickString(row: UnknownRow, keys: string[]) {
 
 function formatNaira(n: number) {
   const value = Math.max(0, Math.floor(n));
-  return "₦" + value.toLocaleString();
+  return "N" + value.toLocaleString();
+}
+
+function isDeliveredStatus(status: string) {
+  return status.toLowerCase() === "delivered";
+}
+
+function isPaidStatus(status: string) {
+  const s = status.toLowerCase();
+  return !["pending_payment", "rejected", "declined", "cancelled", "refunded"].includes(s);
+}
+
+function isPendingPaymentStatus(status: string) {
+  return status.toLowerCase() === "pending_payment";
 }
 
 export default function VendorDashboardPage() {
@@ -46,8 +59,6 @@ export default function VendorDashboardPage() {
   const [loading, setLoading] = useState(true);
 
   const isFoodVendor = role === "vendor_food" || role === "admin";
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const isProductVendor = role === "vendor_products";
 
   const uploadLabel = isFoodVendor ? "food" : "product";
   const addHref = isFoodVendor ? "/vendor/food/new" : "/vendor/products/new";
@@ -124,21 +135,26 @@ export default function VendorDashboardPage() {
     };
   }, []);
 
-  const totalOrders = orders.length;
-
-  const grossRevenue = useMemo(() => {
-    return orders.reduce((sum, row) => {
+  const summary = useMemo(() => {
+    const rows = orders.map((row) => {
+      const status = pickString(row, ["status"]) || "pending_payment";
       const amount = pickNumber(row, ["total_amount", "total", "amount", "grand_total", "subtotal"]);
-      return sum + amount;
-    }, 0);
+      const net = Math.max(0, Math.round(amount - amount * 0.05));
+      return { status, net };
+    });
+
+    const settled = rows.filter((r) => isDeliveredStatus(r.status)).reduce((s, r) => s + r.net, 0);
+    const pendingConfirmation = rows
+      .filter((r) => isPaidStatus(r.status) && !isDeliveredStatus(r.status))
+      .reduce((s, r) => s + r.net, 0);
+
+    return {
+      ordersCount: rows.filter((r) => !isPendingPaymentStatus(r.status)).length,
+      unpaidCount: rows.filter((r) => isPendingPaymentStatus(r.status)).length,
+      pendingConfirmation,
+      settled,
+    };
   }, [orders]);
-
-  const netRevenue = useMemo(() => {
-    const fee = grossRevenue * 0.05;
-    return Math.max(0, Math.round(grossRevenue - fee));
-  }, [grossRevenue]);
-
-  const uploadsCount = uploads.length;
 
   const recentUploads = uploads.slice(0, 3);
   const recentOrders = orders.slice(0, 3);
@@ -150,21 +166,28 @@ export default function VendorDashboardPage() {
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           <div className="rounded-xl border p-3">
-            <p className="text-xs text-gray-600">Total orders</p>
-            <p className="mt-1 text-lg font-semibold">{loading ? "…" : totalOrders}</p>
+            <p className="text-xs text-gray-600">Orders</p>
+            <p className="mt-1 text-lg font-semibold">{loading ? "..." : summary.ordersCount}</p>
           </div>
 
           <div className="rounded-xl border p-3">
-            <p className="text-xs text-gray-600">Total revenue</p>
-            <p className="mt-1 text-lg font-semibold">{loading ? "…" : formatNaira(netRevenue)}</p>
-            <p className="mt-1 text-[11px] text-gray-500">After 5% fee</p>
+            <p className="text-xs text-gray-600">Pending confirmation</p>
+            <p className="mt-1 text-lg font-semibold">
+              {loading ? "..." : formatNaira(summary.pendingConfirmation)}
+            </p>
           </div>
 
           <div className="rounded-xl border p-3">
-            <p className="text-xs text-gray-600">Uploads</p>
-            <p className="mt-1 text-lg font-semibold">{loading ? "…" : uploadsCount}</p>
+            <p className="text-xs text-gray-600">Vendor revenue settled</p>
+            <p className="mt-1 text-lg font-semibold">{loading ? "..." : formatNaira(summary.settled)}</p>
           </div>
         </div>
+        <p className="mt-2 text-xs text-gray-600">
+          Pending confirmation helps prevent scams until logistics confirms delivery.
+        </p>
+        {summary.unpaidCount > 0 ? (
+          <p className="mt-1 text-xs text-gray-600">{summary.unpaidCount} order(s) are still awaiting customer payment.</p>
+        ) : null}
       </div>
 
       <div className="rounded-2xl border bg-white p-4">
@@ -177,7 +200,7 @@ export default function VendorDashboardPage() {
 
         <div className="mt-3 space-y-2">
           {loading ? (
-            <p className="text-sm text-gray-600">Loading…</p>
+            <p className="text-sm text-gray-600">Loading...</p>
           ) : recentUploads.length === 0 ? (
             <p className="text-sm text-gray-600">No upload yet</p>
           ) : (
@@ -195,10 +218,7 @@ export default function VendorDashboardPage() {
         </div>
 
         <div className="mt-4 grid gap-2">
-          <Link
-            href={addHref}
-            className="w-full rounded-xl bg-black px-4 py-3 text-center text-white"
-          >
+          <Link href={addHref} className="w-full rounded-xl bg-black px-4 py-3 text-center text-white">
             {isFoodVendor ? "Add new food" : "Add new product"}
           </Link>
         </div>
@@ -214,7 +234,7 @@ export default function VendorDashboardPage() {
 
         <div className="mt-3 space-y-2">
           {loading ? (
-            <p className="text-sm text-gray-600">Loading…</p>
+            <p className="text-sm text-gray-600">Loading...</p>
           ) : recentOrders.length === 0 ? (
             <p className="text-sm text-gray-600">No orders yet</p>
           ) : (
@@ -231,7 +251,7 @@ export default function VendorDashboardPage() {
                   </div>
                   <p className="mt-1 text-xs text-gray-500">
                     {status}
-                    {createdAt ? ` • ${createdAt}` : ""}
+                    {createdAt ? ` - ${createdAt}` : ""}
                   </p>
                 </div>
               );

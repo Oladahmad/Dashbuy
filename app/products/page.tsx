@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 
 type Product = {
   id: string;
+  vendor_id: string;
   name: string;
   price: number;
   category: string | null;
@@ -97,22 +98,21 @@ export default function ProductsPage() {
       setLoading(true);
       setMsg("");
 
-      const { data, error } = await supabase
-        .from("products")
-        .select(
-          "id,name,price,category,description,image_path,created_at,profiles:vendor_id(full_name,store_name)"
-        )
-        .eq("is_available", true)
-        .order("created_at", { ascending: false });
+      const res = await fetch("/api/catalog/products", { cache: "no-store" });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        products?: Product[];
+      };
 
-      if (error) {
-        setMsg(error.message);
+      if (!res.ok || !body.ok) {
+        setMsg(body.error ?? "Failed to load products");
         setProducts([]);
         setLoading(false);
         return;
       }
 
-      const rows = ((data as unknown) ?? []) as Product[];
+      const rows = Array.isArray(body.products) ? body.products : [];
       setProducts(rows);
 
       const uniq = Array.from(
@@ -159,13 +159,7 @@ export default function ProductsPage() {
       return;
     }
 
-    const { data: ownerRow } = await supabase
-      .from("products")
-      .select("vendor_id")
-      .eq("id", activeProduct.id)
-      .maybeSingle<{ vendor_id: string }>();
-
-    const vendorId = String(ownerRow?.vendor_id ?? "").trim();
+    const vendorId = String(activeProduct.vendor_id ?? "").trim();
     if (!vendorId) {
       setMsg("Vendor missing for this product");
       setDrawerOpen(false);
