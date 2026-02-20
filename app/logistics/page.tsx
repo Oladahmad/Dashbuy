@@ -26,6 +26,7 @@ type LogisticsJobRow = {
   order_type: string | null;
   food_mode: string | null;
   order_total: number | null;
+  delivery_fee?: number | null;
   customer_note?: string | null;
 };
 
@@ -150,15 +151,17 @@ export default function LogisticsPage() {
       );
 
       const orderNoteMap = new Map<string, string>();
+      const orderDeliveryFeeMap = new Map<string, number>();
       if (orderIds.length > 0) {
         const { data: orderRows, error: orderErr } = await supabase
           .from("orders")
-          .select("id,notes")
+          .select("id,notes,delivery_fee")
           .in("id", orderIds);
 
         if (!orderErr && orderRows) {
-          for (const o of orderRows as Array<{ id: string; notes: string | null }>) {
+          for (const o of orderRows as Array<{ id: string; notes: string | null; delivery_fee: number | null }>) {
             orderNoteMap.set(o.id, cleanText(o.notes));
+            orderDeliveryFeeMap.set(o.id, safeNumber(o.delivery_fee, 0));
           }
         }
       }
@@ -212,6 +215,7 @@ export default function LogisticsPage() {
           vendor_phone: vendorPhone || null,
           vendor_address: vendorAddress || null,
           customer_note: orderNoteMap.get(j.order_id) || null,
+          delivery_fee: orderDeliveryFeeMap.get(j.order_id) ?? 0,
         };
       });
 
@@ -234,6 +238,16 @@ export default function LogisticsPage() {
     () => jobs.filter((j) => j.status === "picked_up"),
     [jobs]
   );
+  const deliveredJobs = useMemo(
+    () => jobs.filter((j) => j.status === "delivered"),
+    [jobs]
+  );
+  const toDeliverCount = pendingPickupJobs.length + pickedUpJobs.length;
+  const deliveredCount = deliveredJobs.length;
+  const deliveredEarnings = useMemo(
+    () => deliveredJobs.reduce((sum, j) => sum + safeNumber(j.delivery_fee, 0), 0),
+    [deliveredJobs]
+  );
 
   const list = tab === "pending_pickup" ? pendingPickupJobs : pickedUpJobs;
 
@@ -241,14 +255,27 @@ export default function LogisticsPage() {
     setSaving(true);
     setMsg(null);
 
-    const { error } = await supabase
-      .from("logistics_jobs")
-      .update({ status: next })
-      .eq("id", job.id);
-
-    if (error) {
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (sessionErr || !token) {
       setSaving(false);
-      setMsg(error.message);
+      setMsg("Not signed in");
+      return;
+    }
+
+    const resp = await fetch("/api/logistics/jobs/status", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ jobId: job.id, nextStatus: next }),
+    });
+
+    const body = (await resp.json()) as { ok?: boolean; error?: string };
+    if (!resp.ok || !body.ok) {
+      setSaving(false);
+      setMsg(body.error ?? "Status update failed");
       return;
     }
 
@@ -270,13 +297,23 @@ export default function LogisticsPage() {
             <p className="text-sm text-gray-600 mt-1">Assigned and picked up deliveries</p>
           </div>
 
-          <button
-            type="button"
-            className="rounded-xl border px-3 py-2 text-sm"
-            onClick={() => router.push("/logistics/history")}
-          >
-            History
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-xl border px-3 py-2 text-sm"
+              onClick={() => router.push("/logistics/withdraw")}
+            >
+              Withdraw
+            </button>
+
+            <button
+              type="button"
+              className="rounded-xl border px-3 py-2 text-sm"
+              onClick={() => router.push("/logistics/history")}
+            >
+              History
+            </button>
+          </div>
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-2">
@@ -295,6 +332,23 @@ export default function LogisticsPage() {
           >
             Picked up ({pickedUpJobs.length})
           </button>
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="rounded-xl border p-3">
+            <p className="text-xs text-gray-600">Orders to deliver</p>
+            <p className="mt-1 text-lg font-semibold">{toDeliverCount}</p>
+          </div>
+
+          <div className="rounded-xl border p-3">
+            <p className="text-xs text-gray-600">Delivery successful</p>
+            <p className="mt-1 text-lg font-semibold">{deliveredCount}</p>
+          </div>
+
+          <div className="rounded-xl border p-3">
+            <p className="text-xs text-gray-600">Amount made</p>
+            <p className="mt-1 text-lg font-semibold">{naira(deliveredEarnings)}</p>
+          </div>
         </div>
 
         {msg ? <p className="text-sm text-red-600 mt-3">{msg}</p> : null}

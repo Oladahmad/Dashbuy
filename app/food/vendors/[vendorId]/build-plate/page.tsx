@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 type Vendor = {
@@ -13,11 +12,11 @@ type Plate = { id: string; name: string; plate_fee: number };
 
 type FoodItem = {
   id: string;
-  vendor_id: string;
   name: string;
   category: string;
   pricing_type: "fixed" | "per_scoop" | "per_unit" | "variant";
   price: number;
+  unit_price?: number | null;
   unit_label: string | null;
   is_available: boolean;
 };
@@ -69,6 +68,13 @@ function formatNaira(n: number) {
   return `₦${Math.round(n).toLocaleString()}`;
 }
 
+function itemUnitPrice(it: FoodItem) {
+  if (it.pricing_type === "per_scoop" || it.pricing_type === "per_unit") {
+    return Number(it.unit_price ?? 0);
+  }
+  return Number(it.price ?? 0);
+}
+
 function readCart(): { vendorId: string | null; plates: CartPlate[] } {
   if (typeof window === "undefined") return { vendorId: null, plates: [] };
   try {
@@ -108,96 +114,62 @@ export default function BuildPlatePage() {
 
   useEffect(() => {
     (async () => {
-      // vendor
-      const { data: v, error: vErr } = await supabase
-        .from("profiles")
-        .select("id,store_name,full_name")
-        .eq("id", vendorId)
-        .maybeSingle<Vendor>();
-      if (vErr || !v) {
+      if (!vendorId) {
         setMsg("Vendor not found");
         return;
       }
-      setVendor(v);
+
+      const res = await fetch(`/api/catalog/food/vendor/${vendorId}`, { cache: "no-store" });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        vendor?: Vendor | null;
+        plates?: Plate[];
+        items?: FoodItem[];
+        variants?: Variant[];
+      };
+
+      if (!res.ok || !body.ok || !body.vendor) {
+        setMsg(body.error ?? "Vendor not found");
+        return;
+      }
+
+      setVendor(body.vendor);
+      const loadedPlates = Array.isArray(body.plates) ? body.plates : [];
+      const loadedItems = Array.isArray(body.items) ? body.items : [];
+      const loadedVariants = Array.isArray(body.variants) ? body.variants : [];
+      setItems(loadedItems);
+      setVariants(loadedVariants);
+
+      if (loadedPlates.length === 0) {
+        setMsg("No plate template available yet.");
+        return;
+      }
 
       let effectivePlateId = plateId;
       if (!effectivePlateId) {
-        const { data: defaults, error: dErr } = await supabase
-          .from("plate_templates")
-          .select("id")
-          .eq("is_active", true)
-          .order("plate_fee", { ascending: true })
-          .limit(1);
-
-        if (dErr || !defaults || defaults.length === 0) {
-          setMsg("No plate template available yet.");
-          return;
-        }
-
-        effectivePlateId = defaults[0].id as string;
+        effectivePlateId = loadedPlates[0].id;
         router.replace(`/food/vendors/${vendorId}/build-plate?plateId=${effectivePlateId}`);
       }
 
-      // plate
-      const { data: p, error: pErr } = await supabase
-        .from("plate_templates")
-        .select("id,name,plate_fee")
-        .eq("id", effectivePlateId)
-        .single();
-
-      if (pErr || !p) {
+      const selectedPlate = loadedPlates.find((p) => p.id === effectivePlateId) ?? null;
+      if (!selectedPlate) {
         setMsg("Plate not found for this vendor");
         return;
       }
-      setPlate(p);
+      setPlate(selectedPlate);
 
-      // items
-      const { data: it, error: itErr } = await supabase
-        .from("food_items")
-        .select("id,vendor_id,name,category,pricing_type,price,unit_label,is_available")
-        .eq("vendor_id", vendorId)
-        .eq("is_available", true)
-        .order("category", { ascending: true })
-        .order("name", { ascending: true });
-
-      if (itErr) {
-        setMsg("Error loading menu: " + itErr.message);
-        return;
+      // default select cheapest variant for each variant item
+      const byFood: Record<string, Variant[]> = {};
+      for (const v of loadedVariants) {
+        if (!byFood[v.food_item_id]) byFood[v.food_item_id] = [];
+        byFood[v.food_item_id].push(v);
       }
-      setItems(it ?? []);
-
-      // variants (only for items that are variant pricing)
-      const variantItemIds = (it ?? [])
-        .filter((x) => x.pricing_type === "variant")
-        .map((x) => x.id);
-
-      if (variantItemIds.length > 0) {
-        const { data: va, error: vaErr } = await supabase
-          .from("food_item_variants")
-          .select("id,food_item_id,name,price,is_available")
-          .in("food_item_id", variantItemIds)
-          .eq("is_available", true)
-          .order("price", { ascending: true });
-
-        if (vaErr) {
-          setMsg("Error loading variants: " + vaErr.message);
-          return;
-        }
-
-        setVariants(va ?? []);
-
-        // default select cheapest variant for each variant item
-        const byFood: Record<string, Variant[]> = {};
-        for (const v of va ?? []) {
-          if (!byFood[v.food_item_id]) byFood[v.food_item_id] = [];
-          byFood[v.food_item_id].push(v);
-        }
-        const defaults: Record<string, string> = {};
-        for (const fid of Object.keys(byFood)) {
-          defaults[fid] = byFood[fid][0]?.id;
-        }
-        setVariantById(defaults);
+      const defaults: Record<string, string> = {};
+      for (const fid of Object.keys(byFood)) {
+        defaults[fid] = byFood[fid][0]?.id;
       }
+      setVariantById(defaults);
 
       setMsg("");
     })();
@@ -251,7 +223,7 @@ export default function BuildPlatePage() {
           category: it.category,
           pricingType: it.pricing_type,
           qty,
-          unitPrice: Number(it.price),
+          unitPrice: itemUnitPrice(it),
           unitLabel: it.unit_label,
         });
       }
@@ -273,7 +245,7 @@ export default function BuildPlatePage() {
   }
 
   function addToCart() {
-    if (!vendor || !plate || !plateId) return;
+    if (!vendor || !plate) return;
 
     if (lines.length === 0) {
       setMsg("Select at least one item to continue.");
@@ -347,7 +319,7 @@ export default function BuildPlatePage() {
                     ? selectedVariant
                       ? `${selectedVariant.name} • ${formatNaira(Number(selectedVariant.price))}`
                       : "No variants available"
-                    : `${formatNaira(Number(it.price))}${it.unit_label ? ` / ${it.unit_label}` : ""}`;
+                    : `${formatNaira(itemUnitPrice(it))}${it.unit_label ? ` / ${it.unit_label}` : ""}`;
 
                 return (
                   <div key={it.id} className="rounded border p-3">
@@ -412,7 +384,7 @@ export default function BuildPlatePage() {
                             qty *
                               (it.pricing_type === "variant"
                                 ? Number(selectedVariant?.price ?? 0)
-                                : Number(it.price))
+                                : itemUnitPrice(it))
                           )}
                         </strong>
                       </p>

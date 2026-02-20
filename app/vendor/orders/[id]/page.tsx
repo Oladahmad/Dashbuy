@@ -75,7 +75,11 @@ function formatDateTime(iso: string) {
 }
 
 function computeGross(o: OrderRow) {
-  return safeNumber(o.total_amount ?? o.total, 0);
+  const subtotal = safeNumber(o.subtotal, 0);
+  if (subtotal > 0) return subtotal;
+  const total = safeNumber(o.total_amount ?? o.total, 0);
+  const delivery = safeNumber(o.delivery_fee, 0);
+  return Math.max(0, total - delivery);
 }
 
 function computeVendorFee(gross: number) {
@@ -190,7 +194,15 @@ export default function VendorOrderDetailsPage() {
       }
 
       const o = one.data;
-      setOrder(o);
+      const { data: job } = await supabase
+        .from("logistics_jobs")
+        .select("status")
+        .eq("order_id", o.id)
+        .maybeSingle<{ status: string | null }>();
+
+      const effectiveStatus =
+        (job?.status ?? "").toLowerCase() === "delivered" ? "delivered" : o.status;
+      setOrder({ ...o, status: effectiveStatus });
 
       if (o.order_type === "product") {
         const r = await supabase
@@ -208,30 +220,37 @@ export default function VendorOrderDetailsPage() {
       }
 
       if (o.order_type === "food") {
-        const mode = o.food_mode ?? "plate";
+        const comboRes = await supabase
+          .from("combo_order_items")
+          .select("id,qty,unit_price,line_total,food_items:combo_food_id(id,name,image_url)")
+          .eq("order_id", o.id);
 
-        if (mode === "combo") {
-          const r = await supabase
-            .from("combo_order_items")
-            .select("id,qty,unit_price,line_total,food_items:combo_food_id(id,name,image_url)")
-            .eq("order_id", o.id);
-
-          if (r.error) {
-            setItemsNote(r.error.message);
-          } else {
-            const rows = (r.data ?? []) as unknown as ComboItemRow[];
-            setComboItems(rows);
-            if (rows.length === 0) setItemsNote("No items found");
-          }
+        if (comboRes.error) {
+          setItemsNote(comboRes.error.message);
         } else {
-          const plates = await supabase.from("order_plates").select("id,order_id").eq("order_id", o.id);
+          const comboRows = (comboRes.data ?? []) as unknown as ComboItemRow[];
+          setComboItems(comboRows);
+          const comboAsPlate: PlateItemRow[] = comboRows.map((it) => ({
+            id: `combo-${it.id}`,
+            qty: it.qty,
+            unit_price: it.unit_price,
+            line_total: it.line_total,
+            food_items: it.food_items,
+            food_item_variants: null,
+          }));
 
+          const plates = await supabase.from("order_plates").select("id,order_id").eq("order_id", o.id);
           if (plates.error) {
             setItemsNote(plates.error.message);
           } else {
             const plateRows = (plates.data ?? []) as OrderPlateRow[];
             if (plateRows.length === 0) {
-              setItemsNote("No plate found for this order");
+              if ((o.food_mode ?? "plate") === "combo") {
+                if (comboRows.length === 0) setItemsNote("No items found");
+              } else {
+                setPlateItems(comboAsPlate);
+                if (comboAsPlate.length === 0) setItemsNote("No items found");
+              }
             } else {
               const plateIds = plateRows.map((p) => p.id);
               const r = await supabase
@@ -245,8 +264,9 @@ export default function VendorOrderDetailsPage() {
                 setItemsNote(r.error.message);
               } else {
                 const rows = (r.data ?? []) as unknown as PlateItemRow[];
-                setPlateItems(rows);
-                if (rows.length === 0) setItemsNote("No items found");
+                const merged = (o.food_mode ?? "plate") === "combo" ? rows : [...rows, ...comboAsPlate];
+                setPlateItems(merged);
+                if (merged.length === 0 && comboRows.length === 0) setItemsNote("No items found");
               }
             }
           }

@@ -38,6 +38,17 @@ function formatNaira(n: number) {
   return "N" + value.toLocaleString();
 }
 
+function orderCommissionBase(row: UnknownRow) {
+  const subtotal = pickNumber(row, ["subtotal"]);
+  if (subtotal > 0) return subtotal;
+
+  const total = pickNumber(row, ["total_amount", "total", "amount", "grand_total"]);
+  const delivery = pickNumber(row, ["delivery_fee"]);
+  if (total > 0) return Math.max(0, total - delivery);
+
+  return 0;
+}
+
 function isDeliveredStatus(status: string) {
   return status.toLowerCase() === "delivered";
 }
@@ -99,6 +110,29 @@ export default function VendorDashboardPage() {
         .limit(20);
 
       const ordersRows = (o ?? []) as UnknownRow[];
+      const orderIds = ordersRows
+        .map((row) => pickString(row, ["id"]))
+        .filter((x) => x.length > 0);
+
+      if (orderIds.length > 0) {
+        const { data: jobs } = await supabase
+          .from("logistics_jobs")
+          .select("order_id,status")
+          .in("order_id", orderIds);
+
+        const deliveredOrderIds = new Set(
+          ((jobs ?? []) as Array<{ order_id: string; status: string | null }>)
+            .filter((j) => (j.status ?? "").toLowerCase() === "delivered")
+            .map((j) => j.order_id)
+        );
+
+        for (const row of ordersRows) {
+          const id = pickString(row, ["id"]);
+          if (id && deliveredOrderIds.has(id)) {
+            row.status = "delivered";
+          }
+        }
+      }
 
       if (!alive) return;
       setOrders(ordersRows);
@@ -138,8 +172,8 @@ export default function VendorDashboardPage() {
   const summary = useMemo(() => {
     const rows = orders.map((row) => {
       const status = pickString(row, ["status"]) || "pending_payment";
-      const amount = pickNumber(row, ["total_amount", "total", "amount", "grand_total", "subtotal"]);
-      const net = Math.max(0, Math.round(amount - amount * 0.05));
+      const base = orderCommissionBase(row);
+      const net = Math.max(0, Math.round(base - base * 0.05));
       return { status, net };
     });
 
@@ -242,7 +276,7 @@ export default function VendorDashboardPage() {
               const id = pickString(row, ["id", "order_id"]) || `order ${idx + 1}`;
               const status = pickString(row, ["status"]) || "pending";
               const createdAt = pickString(row, ["created_at", "inserted_at"]);
-              const amount = pickNumber(row, ["total_amount", "total", "amount", "grand_total", "subtotal"]);
+              const amount = orderCommissionBase(row);
               return (
                 <div key={idx} className="rounded-xl border p-3">
                   <div className="flex items-center justify-between">

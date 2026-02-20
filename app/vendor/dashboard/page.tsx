@@ -6,7 +6,16 @@ import { supabase } from "@/lib/supabaseClient";
 import AppShell from "@/components/AppShell";
 
 type Vendor = { id: string; name: string };
-type OrderRow = { id: string; status: string; total: number; created_at: string; order_type: string };
+type OrderRow = {
+  id: string;
+  status: string;
+  total: number | null;
+  total_amount: number | null;
+  subtotal: number | null;
+  delivery_fee: number | null;
+  created_at: string;
+  order_type: string;
+};
 
 function naira(n: number) {
   return `₦${Math.round(n).toLocaleString()}`;
@@ -14,6 +23,20 @@ function naira(n: number) {
 
 function shortId(id: string) {
   return id.slice(0, 8);
+}
+
+function safeNumber(x: unknown, fallback = 0) {
+  if (typeof x === "number" && Number.isFinite(x)) return x;
+  const n = Number(x);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function commissionBase(o: OrderRow) {
+  const subtotal = safeNumber(o.subtotal, 0);
+  if (subtotal > 0) return subtotal;
+  const total = safeNumber(o.total_amount ?? o.total, 0);
+  const delivery = safeNumber(o.delivery_fee, 0);
+  return Math.max(0, total - delivery);
 }
 
 export default function VendorDashboardPage() {
@@ -30,7 +53,12 @@ export default function VendorDashboardPage() {
   );
 
   const totalRevenue = useMemo(() => {
-    return orders.filter((o) => o.status !== "pending_payment").reduce((sum, o) => sum + Number(o.total), 0);
+    return orders
+      .filter((o) => o.status !== "pending_payment")
+      .reduce((sum, o) => {
+        const base = commissionBase(o);
+        return sum + Math.max(0, Math.round(base - base * 0.05));
+      }, 0);
   }, [orders]);
 
   useEffect(() => {
@@ -63,7 +91,7 @@ export default function VendorDashboardPage() {
 
       const { data: o, error: oErr } = await supabase
         .from("orders")
-        .select("id,status,total,created_at,order_type")
+        .select("id,status,total,total_amount,subtotal,delivery_fee,created_at,order_type")
         .eq("vendor_id", v.id)
         .order("created_at", { ascending: false })
         .limit(20);
@@ -165,7 +193,7 @@ export default function VendorDashboardPage() {
                       </div>
 
                       <div className="text-right">
-                        <p className="text-sm font-bold">{naira(o.total)}</p>
+                        <p className="text-sm font-bold">{naira(commissionBase(o))}</p>
                         <p className="mt-1 text-xs text-gray-600">{o.status}</p>
                       </div>
                     </div>

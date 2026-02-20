@@ -140,7 +140,25 @@ export default function AccountPage() {
       if (ordErr) {
         setOrders([]);
       } else {
-        setOrders((ord as OrderRow[]) ?? []);
+        const rows = (ord as OrderRow[]) ?? [];
+        const orderIds = rows.map((o) => o.id);
+        if (orderIds.length > 0) {
+          const { data: jobs } = await supabase
+            .from("logistics_jobs")
+            .select("order_id,status")
+            .in("order_id", orderIds);
+
+          const deliveredOrderIds = new Set(
+            ((jobs ?? []) as Array<{ order_id: string; status: string | null }>)
+              .filter((j) => (j.status ?? "").toLowerCase() === "delivered")
+              .map((j) => j.order_id)
+          );
+
+          for (const row of rows) {
+            if (deliveredOrderIds.has(row.id)) row.status = "delivered";
+          }
+        }
+        setOrders(rows);
       }
 
       setOrdersLoading(false);

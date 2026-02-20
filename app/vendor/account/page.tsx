@@ -599,62 +599,18 @@ export default function VendorAccountPage() {
 
           {/* Payout */}
           <div className="rounded-2xl border bg-white p-4 space-y-3">
-            <p className="font-semibold">Payout and settlement</p>
+            <p className="font-semibold">Withdrawal</p>
+            <p className="text-sm text-gray-600">
+              Withdraw your settled earnings to any bank account. Bank details are entered on the withdrawal page.
+            </p>
 
-            {!editing ? (
-              <div className="space-y-3">
-                <div className="border-b pb-3">
-                  <p className="text-xs text-gray-600">Bank name</p>
-                  <p className="text-sm">{profile.bank_name ?? "Not set"}</p>
-                </div>
-
-                <div className="border-b pb-3">
-                  <p className="text-xs text-gray-600">Account number</p>
-                  <p className="text-sm">{profile.bank_account_number ?? "Not set"}</p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-gray-600">Account name</p>
-                  <p className="text-sm">{profile.bank_account_name ?? "Not set"}</p>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div>
-                  <label className="text-sm text-gray-700">Bank name</label>
-                  <input
-                    className="mt-1 w-full rounded-xl border px-3 py-3"
-                    placeholder="Eg First Bank"
-                    value={bankName}
-                    onChange={(e) => setBankName(e.target.value)}
-                    disabled={saving}
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm text-gray-700">Account number</label>
-                  <input
-                    className="mt-1 w-full rounded-xl border px-3 py-3"
-                    placeholder="Eg 0123456789"
-                    value={bankAccountNumber}
-                    onChange={(e) => setBankAccountNumber(e.target.value)}
-                    disabled={saving}
-                    inputMode="numeric"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm text-gray-700">Account name</label>
-                  <input
-                    className="mt-1 w-full rounded-xl border px-3 py-3"
-                    placeholder="Eg Sola Foods"
-                    value={bankAccountName}
-                    onChange={(e) => setBankAccountName(e.target.value)}
-                    disabled={saving}
-                  />
-                </div>
-              </div>
-            )}
+            <button
+              type="button"
+              className="w-full rounded-xl bg-black px-4 py-3 text-sm text-white"
+              onClick={() => router.push("/vendor/withdraw")}
+            >
+              Withdraw your earnings
+            </button>
 
             <button
               type="button"

@@ -125,7 +125,15 @@ export default function OrderDetailsPage() {
       }
 
       const ord = o as OrderRow;
-      setOrder(ord);
+      const { data: job } = await supabase
+        .from("logistics_jobs")
+        .select("status")
+        .eq("order_id", ord.id)
+        .maybeSingle<{ status: string | null }>();
+
+      const effectiveStatus =
+        (job?.status ?? "").toLowerCase() === "delivered" ? "delivered" : ord.status;
+      setOrder({ ...ord, status: effectiveStatus });
 
       const { data: vp, error: vErr } = await supabase
         .from("profiles")
@@ -154,24 +162,27 @@ export default function OrderDetailsPage() {
         return;
       }
 
-      const mode = ord.food_mode ?? "plate";
+      const { data: comboRows, error: comboErr } = await supabase
+        .from("combo_order_items")
+        .select("id,qty,unit_price,line_total,food_items:combo_food_id(id,name)")
+        .eq("order_id", ord.id);
 
-      if (mode === "combo") {
-        const { data: it, error: itErr } = await supabase
-          .from("combo_order_items")
-          .select("id,qty,unit_price,line_total,food_items:combo_food_id(id,name)")
-          .eq("order_id", ord.id);
-
-        if (itErr) {
-          setMsg(itErr.message);
-          setLoading(false);
-          return;
-        }
-
-        setComboItems((it as unknown as ComboItemRow[]) ?? []);
+      if (comboErr) {
+        setMsg(comboErr.message);
         setLoading(false);
         return;
       }
+
+      const comboList = (comboRows as unknown as ComboItemRow[]) ?? [];
+      setComboItems(comboList);
+      const comboAsPlate: PlateItemRow[] = comboList.map((it) => ({
+        id: `combo-${it.id}`,
+        qty: it.qty,
+        unit_price: it.unit_price,
+        line_total: it.line_total,
+        food_items: it.food_items,
+        food_item_variants: null,
+      }));
 
       const { data: plates, error: pErr } = await supabase
         .from("order_plates")
@@ -187,26 +198,25 @@ export default function OrderDetailsPage() {
       const plateRows = (plates as { id: string }[]) ?? [];
       const plateIds = plateRows.map((x) => x.id);
 
-      if (plateIds.length === 0) {
-        setPlateItems([]);
-        setLoading(false);
-        return;
+      if (plateIds.length > 0) {
+        const { data: pit, error: pitErr } = await supabase
+          .from("order_plate_items")
+          .select(
+            "id,qty,unit_price,line_total,food_items:food_item_id(id,name),food_item_variants:variant_id(id,name)"
+          )
+          .in("order_plate_id", plateIds);
+
+        if (pitErr) {
+          setMsg(pitErr.message);
+          setLoading(false);
+          return;
+        }
+
+        const plateList = (pit as unknown as PlateItemRow[]) ?? [];
+        setPlateItems((ord.food_mode ?? "plate") === "combo" ? plateList : [...plateList, ...comboAsPlate]);
+      } else {
+        setPlateItems((ord.food_mode ?? "plate") === "combo" ? [] : comboAsPlate);
       }
-
-      const { data: pit, error: pitErr } = await supabase
-        .from("order_plate_items")
-        .select(
-          "id,qty,unit_price,line_total,food_items:food_item_id(id,name),food_item_variants:variant_id(id,name)"
-        )
-        .in("order_plate_id", plateIds);
-
-      if (pitErr) {
-        setMsg(pitErr.message);
-        setLoading(false);
-        return;
-      }
-
-      setPlateItems((pit as unknown as PlateItemRow[]) ?? []);
       setLoading(false);
     })();
   }, [id, router]);

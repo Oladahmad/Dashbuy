@@ -10,7 +10,7 @@ export async function GET(_: Request, { params }: Params) {
 
   if (!vendorId) {
     return NextResponse.json(
-      { ok: false, error: "Missing vendor id", vendor: null, plates: [], items: [] },
+      { ok: false, error: "Missing vendor id", vendor: null, plates: [], items: [], variants: [] },
       { status: 400 }
     );
   }
@@ -23,7 +23,7 @@ export async function GET(_: Request, { params }: Params) {
 
   if (vendorError || !vendor) {
     return NextResponse.json(
-      { ok: false, error: "Vendor not found", vendor: null, plates: [], items: [] },
+      { ok: false, error: "Vendor not found", vendor: null, plates: [], items: [], variants: [] },
       { status: 404 }
     );
   }
@@ -36,7 +36,7 @@ export async function GET(_: Request, { params }: Params) {
 
   if (platesError) {
     return NextResponse.json(
-      { ok: false, error: "Plates error: " + platesError.message, vendor, plates: [], items: [] },
+      { ok: false, error: "Plates error: " + platesError.message, vendor, plates: [], items: [], variants: [] },
       { status: 500 }
     );
   }
@@ -54,9 +54,38 @@ export async function GET(_: Request, { params }: Params) {
 
   if (itemsError) {
     return NextResponse.json(
-      { ok: false, error: "Menu error: " + itemsError.message, vendor, plates: plates ?? [], items: [] },
+      { ok: false, error: "Menu error: " + itemsError.message, vendor, plates: plates ?? [], items: [], variants: [] },
       { status: 500 }
     );
+  }
+
+  const itemIds = (items ?? []).map((x: { id: string }) => x.id);
+  let variants: unknown[] = [];
+
+  if (itemIds.length > 0) {
+    const { data: variantRows, error: variantsError } = await supabaseAdmin
+      .from("food_item_variants")
+      .select("id,food_item_id,name,price,is_available")
+      .in("food_item_id", itemIds)
+      .eq("is_available", true)
+      .order("price", { ascending: true })
+      .order("name", { ascending: true });
+
+    if (variantsError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Variants error: " + variantsError.message,
+          vendor,
+          plates: plates ?? [],
+          items: items ?? [],
+          variants: [],
+        },
+        { status: 500 }
+      );
+    }
+
+    variants = variantRows ?? [];
   }
 
   return NextResponse.json({
@@ -64,5 +93,6 @@ export async function GET(_: Request, { params }: Params) {
     vendor,
     plates: plates ?? [],
     items: items ?? [],
+    variants,
   });
 }

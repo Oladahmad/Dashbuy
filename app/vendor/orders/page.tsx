@@ -44,7 +44,11 @@ function formatDateTime(iso: string) {
 }
 
 function computeGross(o: OrderRow) {
-  return safeNumber(o.total_amount ?? o.total, 0);
+  const subtotal = safeNumber(o.subtotal, 0);
+  if (subtotal > 0) return subtotal;
+  const total = safeNumber(o.total_amount ?? o.total, 0);
+  const delivery = safeNumber(o.delivery_fee, 0);
+  return Math.max(0, total - delivery);
 }
 
 function computePlatformFee(gross: number) {
@@ -143,7 +147,25 @@ export default function VendorOrdersPage() {
         setErr(error.message);
         setOrders([]);
       } else {
-        setOrders((data ?? []) as OrderRow[]);
+        const rows = (data ?? []) as OrderRow[];
+        const orderIds = rows.map((r) => r.id);
+        if (orderIds.length > 0) {
+          const { data: jobs } = await supabase
+            .from("logistics_jobs")
+            .select("order_id,status")
+            .in("order_id", orderIds);
+
+          const deliveredOrderIds = new Set(
+            ((jobs ?? []) as Array<{ order_id: string; status: string | null }>)
+              .filter((j) => (j.status ?? "").toLowerCase() === "delivered")
+              .map((j) => j.order_id)
+          );
+
+          for (const row of rows) {
+            if (deliveredOrderIds.has(row.id)) row.status = "delivered";
+          }
+        }
+        setOrders(rows);
       }
 
       setLoading(false);
