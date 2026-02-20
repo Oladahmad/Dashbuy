@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 
 type Role = "customer" | "vendor_food" | "vendor_products" | "logistics" | "admin";
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -165,5 +165,13 @@ export default function LoginPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-white flex items-center justify-center p-6"><div className="w-full max-w-md rounded-2xl border bg-white p-6 text-sm text-gray-600">Loading login...</div></main>}>
+      <LoginPageInner />
+    </Suspense>
   );
 }

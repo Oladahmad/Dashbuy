@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 
-export default function PayCallbackPage() {
+function PayCallbackPageInner() {
   const sp = useSearchParams();
   const router = useRouter();
 
@@ -50,5 +50,13 @@ export default function PayCallbackPage() {
         <p className="mt-1 text-lg">{msg}</p>
       </div>
     </main>
+  );
+}
+
+export default function PayCallbackPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-white flex items-center justify-center p-6"><div className="w-full max-w-md rounded-2xl border bg-white p-6"><p className="text-sm text-gray-600">Paystack</p><p className="mt-1 text-lg">Verifying payment...</p></div></main>}>
+      <PayCallbackPageInner />
+    </Suspense>
   );
 }

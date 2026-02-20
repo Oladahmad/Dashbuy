@@ -1,8 +1,9 @@
 "use client";
 
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 
-export default function FoodOrderSuccess() {
+function FoodOrderSuccessInner() {
   const sp = useSearchParams();
   const orderId = sp.get("orderId");
 
@@ -18,5 +19,13 @@ export default function FoodOrderSuccess() {
         Back to vendors
       </a>
     </main>
+  );
+}
+
+export default function FoodOrderSuccess() {
+  return (
+    <Suspense fallback={<main className="p-6 max-w-xl"><p>Loading...</p></main>}>
+      <FoodOrderSuccessInner />
+    </Suspense>
   );
 }

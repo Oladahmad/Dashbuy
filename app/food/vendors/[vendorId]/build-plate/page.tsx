@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 type Vendor = {
@@ -94,7 +94,7 @@ function writeCart(vendorId: string, plates: CartPlate[]) {
   localStorage.setItem(CART_KEY, JSON.stringify({ vendorId, plates }));
 }
 
-export default function BuildPlatePage() {
+function BuildPlatePageInner() {
   const { vendorId } = useParams<{ vendorId: string }>();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -411,5 +411,13 @@ export default function BuildPlatePage() {
         </button>
       </div>
     </main>
+  );
+}
+
+export default function BuildPlatePage() {
+  return (
+    <Suspense fallback={<main className="p-6">Loading...</main>}>
+      <BuildPlatePageInner />
+    </Suspense>
   );
 }

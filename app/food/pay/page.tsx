@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-export default function PayPage() {
+function PayPageInner() {
   const sp = useSearchParams();
   const orderId = sp.get("orderId");
 
@@ -48,5 +48,13 @@ export default function PayPage() {
       <h1 className="text-2xl font-bold">Paystack Payment</h1>
       <p className="mt-3 text-gray-600">{msg}</p>
     </main>
+  );
+}
+
+export default function PayPage() {
+  return (
+    <Suspense fallback={<main className="p-6 max-w-xl"><p className="mt-3 text-gray-600">Preparing payment...</p></main>}>
+      <PayPageInner />
+    </Suspense>
   );
 }

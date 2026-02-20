@@ -1,5 +1,9 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
+import path from "path";
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  // Force tracing root to this repo to avoid multi-lockfile root inference issues on CI/Vercel.
+  outputFileTracingRoot: path.resolve(process.cwd()),
   images: {
     remotePatterns: [
       {
@@ -11,4 +15,4 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+export default nextConfig;

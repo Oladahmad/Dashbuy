@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import { supabase } from "@/lib/supabaseClient";
 
 const CART_KEY = "dashbuy_products_cart_v1";
 
-export default function ProductsPaymentCallbackPage() {
+function PaymentCallbackInner() {
   const sp = useSearchParams();
   const router = useRouter();
 
@@ -77,5 +77,13 @@ export default function ProductsPaymentCallbackPage() {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+export default function ProductsPaymentCallbackPage() {
+  return (
+    <Suspense fallback={<AppShell title="Payment"><div className="rounded-2xl border bg-white p-5"><p className="font-semibold">Loading payment details...</p></div></AppShell>}>
+      <PaymentCallbackInner />
+    </Suspense>
   );
 }
