@@ -168,7 +168,7 @@ export default function VendorMenuPage() {
     <main className="p-6 max-w-3xl mx-auto">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold truncate">{vendorName(vendor)}</h1>
+          <h1 className="text-xl font-bold truncate sm:text-2xl">{vendorName(vendor)}</h1>
           <p className="mt-1 text-sm text-gray-600">{vendorArea(vendor)}</p>
         </div>
 

@@ -45,7 +45,7 @@ function PayPageInner() {
 
   return (
     <main className="p-6 max-w-xl">
-      <h1 className="text-2xl font-bold">Paystack Payment</h1>
+      <h1 className="text-xl font-bold sm:text-2xl">Paystack Payment</h1>
       <p className="mt-3 text-gray-600">{msg}</p>
     </main>
   );

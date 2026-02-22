@@ -26,7 +26,7 @@ export default function AuthCard({
         <div className="rounded-2xl border bg-white p-6 shadow-sm">
           {/* Logo + header */}
           <div className="mb-6 text-center">
-            <p className="text-3xl font-extrabold">
+            <p className="text-2xl font-extrabold sm:text-3xl">
               <span className="text-orange-600">Dash</span>buy
             </p>
 

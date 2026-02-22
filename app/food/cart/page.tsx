@@ -154,7 +154,7 @@ export default function FoodCartPage() {
 
   return (
     <main className="p-6 max-w-3xl">
-      <h1 className="text-2xl font-bold">Food Cart</h1>
+      <h1 className="text-xl font-bold sm:text-2xl">Food Cart</h1>
 
       {vendorName ? (
         <p className="mt-2 text-gray-600">

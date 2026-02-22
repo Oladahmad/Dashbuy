@@ -9,7 +9,7 @@ export default function AboutPage() {
   return (
     <AppShell title="About Dashbuy">
       <div className="rounded-2xl border bg-white p-5">
-        <h1 className="text-2xl font-bold">About Dashbuy</h1>
+      <h1 className="text-xl font-bold sm:text-2xl">About Dashbuy</h1>
         <p className="mt-2 text-sm text-gray-600">
           Dashbuy helps you order food and shop everyday products around Ago with a simple, fast, mobile first experience.
         </p>

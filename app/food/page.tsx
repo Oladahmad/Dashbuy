@@ -168,7 +168,7 @@ export default function FoodHubPage() {
 
   return (
     <main className="p-4 max-w-6xl mx-auto">
-      <h1 className="text-2xl font-bold">Food</h1>
+      <h1 className="text-xl font-bold sm:text-2xl">Food</h1>
 
       <div className="mt-4 flex gap-2">
         <button

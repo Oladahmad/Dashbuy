@@ -134,7 +134,7 @@ export default function ProductDetailsPage() {
 
   return (
     <main className="p-6 max-w-xl">
-      <h1 className="text-2xl font-bold">{p.name}</h1>
+      <h1 className="text-xl font-bold sm:text-2xl">{p.name}</h1>
 
       <p className="mt-1 text-xs text-gray-500">
         Sold by: <span className="font-medium">{vendorDisplayName}</span>
@@ -142,7 +142,7 @@ export default function ProductDetailsPage() {
 
       <p className="mt-2 text-sm text-gray-600">{p.category ?? "Uncategorized"}</p>
 
-      <p className="mt-4 text-2xl font-bold">{naira(p.price)}</p>
+      <p className="mt-4 text-xl font-bold sm:text-2xl">{naira(p.price)}</p>
 
       {p.description ? (
         <p className="mt-4 text-gray-700">{p.description}</p>

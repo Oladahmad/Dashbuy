@@ -89,7 +89,7 @@ export default function VendorPlatesPage() {
 
   return (
     <main className="p-6 max-w-2xl">
-      <h1 className="text-2xl font-bold">Plate Templates</h1>
+      <h1 className="text-xl font-bold sm:text-2xl">Plate Templates</h1>
 
       {msg && <p className="mt-3 text-sm">{msg}</p>}
 

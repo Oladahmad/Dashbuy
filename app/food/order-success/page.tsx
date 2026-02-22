@@ -9,7 +9,7 @@ function FoodOrderSuccessInner() {
 
   return (
     <main className="p-6 max-w-xl">
-      <h1 className="text-2xl font-bold">Order created ✅</h1>
+      <h1 className="text-xl font-bold sm:text-2xl">Order created ✅</h1>
       <p className="mt-2 text-gray-600">
         Payment is next. Your order id:
       </p>

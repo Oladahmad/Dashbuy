@@ -123,7 +123,7 @@ export default function VendorDashboardPage() {
           {/* Top card */}
           <div className="rounded-2xl border bg-white p-5">
             <p className="text-xs text-gray-500">Welcome</p>
-            <h1 className="mt-1 text-2xl font-bold">{vendor?.name ?? "Vendor"}</h1>
+            <h1 className="mt-1 text-xl font-bold sm:text-2xl">{vendor?.name ?? "Vendor"}</h1>
             <p className="mt-2 text-sm text-gray-600">
               Manage products, foods, and orders in one place.
             </p>
@@ -149,19 +149,19 @@ export default function VendorDashboardPage() {
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <div className="rounded-2xl border bg-white p-4">
               <p className="text-xs text-gray-500">Total revenue</p>
-              <p className="mt-2 text-2xl font-bold">{naira(totalRevenue)}</p>
+              <p className="mt-2 text-xl font-bold sm:text-2xl">{naira(totalRevenue)}</p>
               <p className="mt-1 text-xs text-gray-500">Paid orders</p>
             </div>
 
             <div className="rounded-2xl border bg-white p-4">
               <p className="text-xs text-gray-500">Pending orders</p>
-              <p className="mt-2 text-2xl font-bold">{pendingCount}</p>
+              <p className="mt-2 text-xl font-bold sm:text-2xl">{pendingCount}</p>
               <p className="mt-1 text-xs text-gray-500">Need your action</p>
             </div>
 
             <div className="rounded-2xl border bg-white p-4">
               <p className="text-xs text-gray-500">Products listed</p>
-              <p className="mt-2 text-2xl font-bold">{productsCount}</p>
+              <p className="mt-2 text-xl font-bold sm:text-2xl">{productsCount}</p>
               <p className="mt-1 text-xs text-gray-500">In your store</p>
             </div>
           </div>

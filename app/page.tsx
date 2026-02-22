@@ -44,7 +44,7 @@ export default function HomePage() {
     <AppShell title="Fast food & products around Ago">
       {/* 1) Quick Actions (your block) */}
         <div className="rounded-2xl bg-white border p-5">
-  <h1 className="text-2xl font-bold">What do you want today?</h1>
+          <h1 className="text-xl font-bold sm:text-2xl">What do you want today?</h1>
   <p className="mt-2 text-gray-600">
     Order food from nearby vendors or shop products.
   </p>

@@ -92,7 +92,7 @@ function LoginPageInner() {
           <Image src="/logo.png" alt="Dashbuy" width={64} height={64} className="h-16 w-auto" />
         </div>
 
-        <h1 className="mt-4 text-center text-2xl font-bold">Sign in</h1>
+      <h1 className="mt-4 text-center text-xl font-bold sm:text-2xl">Sign in</h1>
         <p className="mt-1 text-center text-sm text-gray-600">Select user or vendor mode, then sign in.</p>
 
         <div className="mt-5 grid grid-cols-2 gap-2 rounded-xl border p-1">

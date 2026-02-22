@@ -285,7 +285,7 @@ function BuildPlatePageInner() {
         ← Back
       </button>
 
-      <h1 className="mt-3 text-2xl font-bold">
+          <h1 className="mt-3 text-xl font-bold sm:text-2xl">
         Build Plate — {vendorDisplayName(vendor)}
       </h1>
 

@@ -79,7 +79,7 @@ export default function VendorSignupPage() {
           <Image src="/logo.jpg" alt="Dashbuy" width={64} height={64} className="h-16 w-auto" />
         </div>
 
-        <h1 className="mt-4 text-center text-2xl font-bold">Create vendor account</h1>
+      <h1 className="mt-4 text-center text-xl font-bold sm:text-2xl">Create vendor account</h1>
         <p className="mt-1 text-center text-sm text-gray-600">
           Choose what you want to sell.
         </p>

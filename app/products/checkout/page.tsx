@@ -174,7 +174,7 @@ export default function ProductCheckoutPage() {
 
   return (
     <main className="p-6 max-w-3xl">
-      <h1 className="text-2xl font-bold">Checkout</h1>
+      <h1 className="text-xl font-bold sm:text-2xl">Checkout</h1>
 
       {vendorName ? <p className="mt-2 text-gray-600">Vendor: {vendorName}</p> : null}
 

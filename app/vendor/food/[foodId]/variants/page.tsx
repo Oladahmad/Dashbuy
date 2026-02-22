@@ -88,7 +88,7 @@ export default function VariantsPage() {
         ← Back
       </button>
 
-      <h1 className="mt-3 text-2xl font-bold">Manage Variants</h1>
+      <h1 className="mt-3 text-xl font-bold sm:text-2xl">Manage Variants</h1>
 
       {msg && <p className="mt-2 text-sm">{msg}</p>}
 
