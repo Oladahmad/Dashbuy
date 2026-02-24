@@ -16,6 +16,19 @@ type ProductRow = {
   profiles: { full_name: string; store_name: string | null } | null;
 };
 
+type RawProductRow = {
+  id: string;
+  name: string;
+  price: number;
+  category: string | null;
+  image_path: string | null;
+  created_at: string;
+  profiles:
+    | { full_name: string | null; store_name: string | null }
+    | { full_name: string | null; store_name: string | null }[]
+    | null;
+};
+
 function getPublicImageUrl(path: string | null) {
   if (!path) return null;
   const { data } = supabase.storage.from("product-images").getPublicUrl(path);
@@ -72,7 +85,24 @@ export default function HomePage() {
         setProducts([]);
         setProductsErr(error.message || "Failed to load products");
       } else {
-        setProducts((data as ProductRow[]) ?? []);
+        const rows = ((data ?? []) as RawProductRow[]).map((r) => {
+          const p = Array.isArray(r.profiles) ? (r.profiles[0] ?? null) : r.profiles;
+          return {
+            id: r.id,
+            name: r.name,
+            price: Number(r.price ?? 0),
+            category: r.category,
+            image_path: r.image_path,
+            created_at: r.created_at,
+            profiles: p
+              ? {
+                  full_name: p.full_name ?? "",
+                  store_name: p.store_name ?? null,
+                }
+              : null,
+          } satisfies ProductRow;
+        });
+        setProducts(rows);
       }
       setLoading(false);
     })();
