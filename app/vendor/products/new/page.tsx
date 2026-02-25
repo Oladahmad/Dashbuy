@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -53,14 +53,6 @@ export default function VendorProductsNewPage() {
   }, []);
 
   const isAllowed = role === "vendor_products" || role === "admin";
-
-  const canCreate = useMemo(() => {
-    const p = toIntOrNull(price);
-    if (!name.trim()) return false;
-    if (p === null || p <= 0) return false;
-    if (!file) return false;
-    return true;
-  }, [name, price, file]);
 
   async function onCreate() {
     setErr(null);
@@ -222,7 +214,7 @@ export default function VendorProductsNewPage() {
         <button
           type="button"
           className="w-full rounded-xl bg-black px-4 py-3 text-white disabled:opacity-50"
-          disabled={!isAllowed || loading || !canCreate}
+          disabled={!isAllowed || loading}
           onClick={onCreate}
         >
           {loading ? "Creating…" : "Create"}

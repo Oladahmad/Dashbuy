@@ -801,7 +801,7 @@ export default function VendorNewFoodPage() {
         <button
           type="button"
           className="w-full rounded-xl bg-black px-4 py-3 text-white disabled:opacity-50"
-          disabled={!canSave || saving}
+          disabled={saving}
           onClick={createFoodItem}
         >
           {saving ? "Saving…" : "Save"}
