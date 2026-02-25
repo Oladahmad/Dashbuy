@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -69,7 +70,9 @@ export default function PwaInstallCard() {
             Open Dashbuy like a real app, with quick launch from your home screen.
           </p>
         </div>
-        <div className="hidden h-10 w-10 rounded-xl border bg-black sm:block" />
+        <div className="hidden h-10 w-10 overflow-hidden rounded-xl border bg-white sm:block">
+          <Image src="/logo.png" alt="Dashbuy" width={40} height={40} className="h-10 w-10 object-cover" />
+        </div>
       </div>
 
       <div className="mt-4 flex items-center gap-2">
@@ -88,4 +91,3 @@ export default function PwaInstallCard() {
     </div>
   );
 }
-

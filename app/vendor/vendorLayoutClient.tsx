@@ -55,7 +55,7 @@ export default function VendorLayoutClient({ children }: { children: ReactNode }
       const user = u.user;
 
       if (!user) {
-        router.replace("/auth/signin?mode=vendor");
+        router.replace("/auth/login?mode=vendor");
         return;
       }
 

@@ -7,6 +7,10 @@ export const metadata: Metadata = {
   title: "Dashbuy",
   description: "Fast food and products around Ago",
   manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
