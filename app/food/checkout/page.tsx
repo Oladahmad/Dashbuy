@@ -97,7 +97,18 @@ export default function FoodCheckoutPage() {
   const platesSubtotal = useMemo(() => plates.reduce((sum, p) => sum + Number(p.plateTotal), 0), [plates]);
   const combosSubtotal = useMemo(() => combos.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0), [combos]);
   const subtotal = platesSubtotal + combosSubtotal;
-  const total = subtotal + DELIVERY_FEE;
+  const vendorCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const p of plates) {
+      if (p.vendorId) ids.add(p.vendorId);
+    }
+    for (const c of combos) {
+      if (c.vendorId) ids.add(c.vendorId);
+    }
+    return ids.size;
+  }, [plates, combos]);
+  const totalDeliveryFee = vendorCount > 0 ? DELIVERY_FEE * vendorCount : 0;
+  const total = subtotal + totalDeliveryFee;
 
   useEffect(() => {
     (async () => {
@@ -166,9 +177,6 @@ export default function FoodCheckoutPage() {
     const userId = sessionData.session?.user?.id;
     if (!userId) return setMsg("Please login first at /auth");
 
-    const vendorId = plates[0]?.vendorId ?? combos[0]?.vendorId;
-    if (!vendorId) return setMsg("Missing vendor. Add food items again.");
-
     const geoText = geoPoint ? `GPS: ${formatGeoPoint(geoPoint)}` : "";
     const hasAddr = addr.length > 0;
     const hasGeo = !!geoPoint;
@@ -181,86 +189,121 @@ export default function FoodCheckoutPage() {
 
     setLoading(true);
 
-    const foodMode: "plate" | "combo" = plates.length > 0 ? "plate" : "combo";
-    const { data: order, error: orderErr } = await supabase
-      .from("orders")
-      .insert({
-        order_type: "food",
-        food_mode: foodMode,
-        customer_id: userId,
-        vendor_id: vendorId,
-        status: "pending_payment",
-        subtotal,
-        delivery_fee: DELIVERY_FEE,
-        total,
-        delivery_address: deliveryAddressPayload,
-        delivery_address_source: "manual",
-        customer_phone: phoneClean,
-        notes: notesPayload ? notesPayload : null,
-      })
-      .select("id")
-      .single();
+    const grouped = new Map<string, { plates: CartPlate[]; combos: ComboCartItem[] }>();
+    for (const p of plates) {
+      if (!p.vendorId) continue;
+      const entry = grouped.get(p.vendorId) ?? { plates: [], combos: [] };
+      entry.plates.push(p);
+      grouped.set(p.vendorId, entry);
+    }
+    for (const c of combos) {
+      if (!c.vendorId) continue;
+      const entry = grouped.get(c.vendorId) ?? { plates: [], combos: [] };
+      entry.combos.push(c);
+      grouped.set(c.vendorId, entry);
+    }
 
-    if (orderErr || !order) {
+    if (grouped.size === 0) {
       setLoading(false);
-      setMsg("Order error: " + (orderErr?.message ?? "unknown"));
+      setMsg("Missing vendor. Add food items again.");
       return;
     }
 
-    for (const p of plates) {
-      const { data: op, error: opErr } = await supabase
-        .from("order_plates")
+    const createdOrderIds: string[] = [];
+
+    for (const [vendorId, group] of grouped.entries()) {
+      const vendorSubtotal =
+        group.plates.reduce((sum, p) => sum + Number(p.plateTotal), 0) +
+        group.combos.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0);
+      const vendorTotal = vendorSubtotal + DELIVERY_FEE;
+      const foodMode: "plate" | "combo" = group.plates.length > 0 ? "plate" : "combo";
+
+      const { data: order, error: orderErr } = await supabase
+        .from("orders")
         .insert({
-          order_id: order.id,
-          plate_template_id: p.plateTemplateId,
-          plate_fee: p.plateFee,
-          plate_total: p.plateTotal,
+          order_type: "food",
+          food_mode: foodMode,
+          customer_id: userId,
+          vendor_id: vendorId,
+          status: "pending_payment",
+          subtotal: vendorSubtotal,
+          delivery_fee: DELIVERY_FEE,
+          total: vendorTotal,
+          delivery_address: deliveryAddressPayload,
+          delivery_address_source: "manual",
+          customer_phone: phoneClean,
+          notes: notesPayload ? notesPayload : null,
         })
         .select("id")
         .single();
 
-      if (opErr || !op) {
+      if (orderErr || !order) {
         setLoading(false);
-        setMsg("Order plate error: " + (opErr?.message ?? "unknown"));
+        setMsg("Order error: " + (orderErr?.message ?? "unknown"));
         return;
       }
 
-      const rows = p.lines.map((l) => ({
-        order_plate_id: op.id,
-        food_item_id: l.foodItemId,
-        variant_id: l.variantId ?? null,
-        qty: l.qty,
-        unit_price: l.unitPrice,
-        line_total: l.qty * l.unitPrice,
-      }));
+      createdOrderIds.push(order.id);
 
-      const { error: itemsErr } = await supabase.from("order_plate_items").insert(rows);
-      if (itemsErr) {
-        setLoading(false);
-        setMsg("Plate items error: " + itemsErr.message);
-        return;
+      for (const p of group.plates) {
+        const { data: op, error: opErr } = await supabase
+          .from("order_plates")
+          .insert({
+            order_id: order.id,
+            plate_template_id: p.plateTemplateId,
+            plate_fee: p.plateFee,
+            plate_total: p.plateTotal,
+          })
+          .select("id")
+          .single();
+
+        if (opErr || !op) {
+          setLoading(false);
+          setMsg("Order plate error: " + (opErr?.message ?? "unknown"));
+          return;
+        }
+
+        const rows = p.lines.map((l) => ({
+          order_plate_id: op.id,
+          food_item_id: l.foodItemId,
+          variant_id: l.variantId ?? null,
+          qty: l.qty,
+          unit_price: l.unitPrice,
+          line_total: l.qty * l.unitPrice,
+        }));
+
+        const { error: itemsErr } = await supabase.from("order_plate_items").insert(rows);
+        if (itemsErr) {
+          setLoading(false);
+          setMsg("Plate items error: " + itemsErr.message);
+          return;
+        }
       }
-    }
 
-    if (combos.length > 0) {
-      const comboRows = combos.map((it) => ({
-        order_id: order.id,
-        combo_food_id: it.comboId,
-        qty: it.qty,
-        unit_price: it.price,
-        line_total: it.price * it.qty,
-      }));
-      const { error: comboErr } = await supabase.from("combo_order_items").insert(comboRows);
-      if (comboErr) {
-        setLoading(false);
-        setMsg("Combo items error: " + comboErr.message);
-        return;
+      if (group.combos.length > 0) {
+        const comboRows = group.combos.map((it) => ({
+          order_id: order.id,
+          combo_food_id: it.comboId,
+          qty: it.qty,
+          unit_price: it.price,
+          line_total: it.price * it.qty,
+        }));
+        const { error: comboErr } = await supabase.from("combo_order_items").insert(comboRows);
+        if (comboErr) {
+          setLoading(false);
+          setMsg("Combo items error: " + comboErr.message);
+          return;
+        }
       }
     }
 
     localStorage.removeItem(FOOD_CART_KEY);
     setLoading(false);
-    router.push(`/food/pay?orderId=${order.id}`);
+    if (createdOrderIds.length === 1) {
+      router.push(`/food/pay?orderId=${createdOrderIds[0]}`);
+      return;
+    }
+    router.push("/orders");
   }
 
   if (loading) return <main className="p-6">Loading...</main>;
@@ -269,7 +312,8 @@ export default function FoodCheckoutPage() {
   return (
     <main className="mx-auto max-w-2xl p-4">
       <h1 className="text-xl font-bold sm:text-2xl">Checkout</h1>
-      {vendorName ? <p className="mt-2 text-gray-600">Vendor: {vendorName}</p> : null}
+      {vendorCount === 1 && vendorName ? <p className="mt-2 text-gray-600">Vendor: {vendorName}</p> : null}
+      {vendorCount > 1 ? <p className="mt-2 text-gray-600">Vendors: {vendorCount}</p> : null}
 
       <section className="mt-4 rounded-2xl border bg-white p-4">
         <h2 className="font-semibold">Order summary</h2>
@@ -302,7 +346,9 @@ export default function FoodCheckoutPage() {
         </div>
         <div className="flex justify-between">
           <span>Delivery fee</span>
-          <span className="font-semibold">{formatNaira(DELIVERY_FEE)}</span>
+          <span className="font-semibold">
+            {formatNaira(totalDeliveryFee)} ({vendorCount} vendor{vendorCount === 1 ? "" : "s"})
+          </span>
         </div>
         <div className="mt-2 flex justify-between text-lg">
           <span>Total</span>

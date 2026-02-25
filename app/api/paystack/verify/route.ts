@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { notifyOrderEvent } from "@/lib/orderNotifications";
 
 export async function POST(req: Request) {
   try {
@@ -114,6 +115,14 @@ export async function POST(req: Request) {
           { status: 404 }
         );
       }
+      await notifyOrderEvent({
+        event: "order_paid",
+        orderId: updatedOrder.id,
+        vendorId: updatedOrder.vendor_id,
+        customerId: updatedOrder.customer_id,
+        amountNaira: updatedOrder.total_amount,
+        orderType: updatedOrder.order_type,
+      });
 
       return NextResponse.json({
         ok: true,

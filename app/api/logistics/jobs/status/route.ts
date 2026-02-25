@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { notifyOrderEvent } from "@/lib/orderNotifications";
 
 type JobStatus = "pending_pickup" | "picked_up" | "delivered" | "cancelled";
 
@@ -81,9 +82,17 @@ export async function POST(req: Request) {
 
     const { data: job, error: jobErr } = await a
       .from("logistics_jobs")
-      .select("id,order_id,status")
+      .select("id,order_id,status,vendor_id,customer_id,order_total,order_type")
       .eq("id", jobId)
-      .maybeSingle<{ id: string; order_id: string; status: JobStatus }>();
+      .maybeSingle<{
+        id: string;
+        order_id: string;
+        status: JobStatus;
+        vendor_id: string;
+        customer_id: string;
+        order_total: number | null;
+        order_type: string | null;
+      }>();
 
     if (jobErr) {
       return NextResponse.json({ ok: false, error: "Job error: " + jobErr.message }, { status: 500 });
@@ -123,6 +132,28 @@ export async function POST(req: Request) {
         { ok: false, error: "Update order error: " + updateOrderErr.message },
         { status: 500 }
       );
+    }
+
+    if (nextStatus === "picked_up") {
+      await notifyOrderEvent({
+        event: "delivery_out",
+        orderId: job.order_id,
+        vendorId: job.vendor_id,
+        customerId: job.customer_id,
+        amountNaira: job.order_total,
+        orderType: job.order_type,
+      });
+    }
+
+    if (nextStatus === "delivered") {
+      await notifyOrderEvent({
+        event: "delivered",
+        orderId: job.order_id,
+        vendorId: job.vendor_id,
+        customerId: job.customer_id,
+        amountNaira: job.order_total,
+        orderType: job.order_type,
+      });
     }
 
     return NextResponse.json({

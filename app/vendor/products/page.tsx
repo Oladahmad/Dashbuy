@@ -35,6 +35,7 @@ export default function VendorProductsPage() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [actionId, setActionId] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -81,6 +82,7 @@ export default function VendorProductsPage() {
 
   async function toggleAvailable(id: string, nextAvailable: boolean) {
     setErr(null);
+    setActionId(id);
 
     const { error } = await supabase
       .from("products")
@@ -89,10 +91,30 @@ export default function VendorProductsPage() {
 
     if (error) {
       setErr(error.message);
+      setActionId(null);
       return;
     }
 
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, is_available: nextAvailable } : r)));
+    setActionId(null);
+  }
+
+  async function deleteProduct(id: string) {
+    const yes = window.confirm("Delete this product?");
+    if (!yes) return;
+
+    setErr(null);
+    setActionId(id);
+
+    const { error } = await supabase.from("products").delete().eq("id", id);
+    if (error) {
+      setErr(error.message);
+      setActionId(null);
+      return;
+    }
+
+    setRows((prev) => prev.filter((r) => r.id !== id));
+    setActionId(null);
   }
 
   return (
@@ -142,15 +164,37 @@ export default function VendorProductsPage() {
                     <p className="text-sm text-gray-600 mt-1">{formatNaira(r.price)}</p>
                   </div>
 
-                  <button
-                    type="button"
-                    className={`rounded-xl px-3 py-2 text-sm border ${
-                      available ? "bg-white" : "bg-black text-white border-black"
-                    }`}
-                    onClick={() => toggleAvailable(r.id, !available)}
-                  >
-                    {available ? "Disable" : "Enable"}
-                  </button>
+                  <details className="relative">
+                    <summary className="list-none cursor-pointer rounded-xl border px-3 py-2 text-sm">
+                      Options
+                    </summary>
+                    <div className="absolute right-0 z-10 mt-2 w-40 rounded-xl border bg-white p-2 shadow-sm">
+                      <Link
+                        href={`/vendor/products/${r.id}`}
+                        className="block rounded-lg px-3 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Edit
+                      </Link>
+                      <button
+                        type="button"
+                        className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-100 disabled:opacity-50"
+                        onClick={() => deleteProduct(r.id)}
+                        disabled={actionId === r.id}
+                      >
+                        Delete
+                      </button>
+                      <button
+                        type="button"
+                        className={`mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100 disabled:opacity-50 ${
+                          available ? "text-gray-900" : "text-black font-medium"
+                        }`}
+                        onClick={() => toggleAvailable(r.id, !available)}
+                        disabled={actionId === r.id}
+                      >
+                        {actionId === r.id ? "Saving..." : available ? "Disable" : "Enable"}
+                      </button>
+                    </div>
+                  </details>
                 </div>
               );
             })}

@@ -53,6 +53,20 @@ type CartPlate = {
   lines: PlateLine[];
   createdAt: string;
 };
+type ComboCartItem = {
+  comboId: string;
+  name: string;
+  price: number;
+  qty: number;
+  vendorId: string;
+  vendorName: string;
+};
+
+type FoodCart = {
+  vendorId: string | null;
+  plates: CartPlate[];
+  combos: ComboCartItem[];
+};
 
 const CART_KEY = "dashbuy_food_cart_v1";
 
@@ -75,23 +89,31 @@ function itemUnitPrice(it: FoodItem) {
   return Number(it.price ?? 0);
 }
 
-function readCart(): { vendorId: string | null; plates: CartPlate[] } {
-  if (typeof window === "undefined") return { vendorId: null, plates: [] };
+function readCart(): FoodCart {
+  if (typeof window === "undefined") return { vendorId: null, plates: [], combos: [] };
   try {
     const raw = localStorage.getItem(CART_KEY);
-    if (!raw) return { vendorId: null, plates: [] };
+    if (!raw) return { vendorId: null, plates: [], combos: [] };
     const parsed = JSON.parse(raw);
+    const plates = Array.isArray(parsed.plates) ? parsed.plates : [];
+    const combos = Array.isArray(parsed.combos) ? parsed.combos : [];
     return {
-      vendorId: parsed.vendorId ?? null,
-      plates: Array.isArray(parsed.plates) ? parsed.plates : [],
+      vendorId: parsed.vendorId ?? plates[0]?.vendorId ?? combos[0]?.vendorId ?? null,
+      plates,
+      combos,
     };
   } catch {
-    return { vendorId: null, plates: [] };
+    return { vendorId: null, plates: [], combos: [] };
   }
 }
 
-function writeCart(vendorId: string, plates: CartPlate[]) {
-  localStorage.setItem(CART_KEY, JSON.stringify({ vendorId, plates }));
+function writeCart(cart: FoodCart) {
+  if (cart.plates.length === 0 && cart.combos.length === 0) {
+    localStorage.removeItem(CART_KEY);
+    return;
+  }
+  const vendorId = cart.vendorId ?? cart.plates[0]?.vendorId ?? cart.combos[0]?.vendorId ?? null;
+  localStorage.setItem(CART_KEY, JSON.stringify({ ...cart, vendorId }));
 }
 
 function BuildPlatePageInner() {
@@ -254,13 +276,6 @@ function BuildPlatePageInner() {
 
     const existing = readCart();
 
-    // enforce single-vendor cart for v1 (simple, reduces headaches)
-    let nextPlates = existing.plates;
-    if (existing.vendorId && existing.vendorId !== vendor.id) {
-      // replace cart if vendor changes
-      nextPlates = [];
-    }
-
     const newPlate: CartPlate = {
       vendorId: vendor.id,
       vendorName: vendorDisplayName(vendor),
@@ -272,7 +287,11 @@ function BuildPlatePageInner() {
       createdAt: new Date().toISOString(),
     };
 
-    writeCart(vendor.id, [...nextPlates, newPlate]);
+    writeCart({
+      vendorId: existing.vendorId ?? vendor.id,
+      plates: [...existing.plates, newPlate],
+      combos: existing.combos,
+    });
 
     router.push("/food/cart");
   }

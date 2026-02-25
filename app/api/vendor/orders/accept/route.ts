@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { notifyOrderEvent } from "@/lib/orderNotifications";
 
 type AcceptBody = {
   orderId?: string;
@@ -176,6 +177,15 @@ export async function POST(req: Request) {
         { status: 500 }
       );
     }
+
+    await notifyOrderEvent({
+      event: "vendor_accepted",
+      orderId: order.id,
+      vendorId,
+      customerId: order.customer_id,
+      amountNaira: order.total_amount ?? order.total,
+      orderType: order.order_type,
+    });
 
     return NextResponse.json({ ok: true, jobId: jobData?.id ?? null, order: updated });
   } catch (e: unknown) {

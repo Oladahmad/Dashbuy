@@ -72,11 +72,16 @@ function readFoodCart(): FoodCart {
 }
 
 function writeFoodCart(cart: FoodCart) {
-  if (!cart.vendorId || (cart.plates.length === 0 && cart.combos.length === 0)) {
+  if (cart.plates.length === 0 && cart.combos.length === 0) {
     localStorage.removeItem(FOOD_CART_KEY);
     return;
   }
-  localStorage.setItem(FOOD_CART_KEY, JSON.stringify(cart));
+  const primaryVendorId =
+    cart.vendorId ??
+    cart.plates[0]?.vendorId ??
+    cart.combos[0]?.vendorId ??
+    null;
+  localStorage.setItem(FOOD_CART_KEY, JSON.stringify({ ...cart, vendorId: primaryVendorId }));
 }
 
 function pickVendorName(p: { store_name: string | null; full_name: string | null } | null) {
@@ -137,14 +142,8 @@ export default function FoodHubPage() {
     if (!combo.vendor_id) return;
     const cart = readFoodCart();
 
-    if (cart.vendorId && cart.vendorId !== combo.vendor_id) {
-      cart.vendorId = null;
-      cart.plates = [];
-      cart.combos = [];
-    }
-
     const vendorName = pickVendorName(combo.profiles);
-    cart.vendorId = combo.vendor_id;
+    if (!cart.vendorId) cart.vendorId = combo.vendor_id;
 
     const existing = cart.combos.find((x) => x.comboId === combo.id);
     if (existing) existing.qty += 1;

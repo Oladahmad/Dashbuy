@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import HomeCarousel from "@/components/HomeCarousel";
+import PwaInstallCard from "@/components/PwaInstallCard";
 import { supabase } from "@/lib/supabaseClient";
 
 type ProductRow = {
@@ -230,12 +231,7 @@ export default function HomePage() {
         </div>
       </div>
 
-      <div className="mt-5 rounded-2xl border bg-white p-5">
-        <p className="font-semibold">Quick tip</p>
-        <p className="mt-1 text-sm text-gray-600">
-          Install Dashbuy on your phone for faster ordering (PWA coming soon).
-        </p>
-      </div>
+      <PwaInstallCard />
 
       <div className="mt-5 overflow-hidden rounded-2xl border bg-white">
         <div className="relative">

@@ -43,6 +43,7 @@ type FoodCart = {
 
 const FOOD_CART_KEY = "dashbuy_food_cart_v1";
 const LEGACY_COMBO_CART_KEY = "dashbuy_combo_cart_v1";
+const DELIVERY_FEE = 700;
 
 function formatNaira(n: number) {
   return `N${Math.round(n).toLocaleString()}`;
@@ -114,6 +115,18 @@ export default function FoodCartPage() {
     const comboTotal = combos.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0);
     return plateTotal + comboTotal;
   }, [plates, combos]);
+  const vendorCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const p of plates) {
+      if (p.vendorId) ids.add(p.vendorId);
+    }
+    for (const c of combos) {
+      if (c.vendorId) ids.add(c.vendorId);
+    }
+    return ids.size;
+  }, [plates, combos]);
+  const deliveryFee = vendorCount > 0 ? DELIVERY_FEE * vendorCount : 0;
+  const total = subtotal + deliveryFee;
 
   function removePlate(index: number) {
     const nextPlates = plates.filter((_, i) => i !== index);
@@ -219,6 +232,10 @@ export default function FoodCartPage() {
             <div>
               <p className="text-sm text-gray-600">Subtotal</p>
               <p className="text-xl font-bold">{formatNaira(subtotal)}</p>
+              <p className="mt-1 text-sm text-gray-600">
+                Delivery fee ({vendorCount} vendor{vendorCount === 1 ? "" : "s"}): {formatNaira(deliveryFee)}
+              </p>
+              <p className="mt-1 text-sm font-semibold">Total: {formatNaira(total)}</p>
             </div>
 
             <div className="flex gap-2">

@@ -72,7 +72,12 @@ export default function ProductCheckoutPage() {
     [items]
   );
 
-  const total = subtotal + (items.length ? DELIVERY_FEE : 0);
+  const vendorCount = useMemo(
+    () => new Set(items.map((it) => String(it.vendorId || "").trim()).filter(Boolean)).size,
+    [items]
+  );
+  const deliveryFee = items.length ? DELIVERY_FEE * Math.max(1, vendorCount) : 0;
+  const total = subtotal + deliveryFee;
 
   useEffect(() => {
     (async () => {
@@ -157,14 +162,6 @@ export default function ProductCheckoutPage() {
       return;
     }
 
-    const vendorId = items[0].vendorId;
-
-    const allSameVendor = items.every((it) => it.vendorId === vendorId);
-    if (!allSameVendor) {
-      setMsg("Your cart contains items from multiple vendors. Please checkout one vendor at a time.");
-      return;
-    }
-
     const geoText = geoPoint ? `GPS: ${formatGeoPoint(geoPoint)}` : "";
     const hasAddr = addr.length > 0;
     const hasGeo = !!geoPoint;
@@ -177,52 +174,79 @@ export default function ProductCheckoutPage() {
 
     setLoading(true);
 
-    const { data: order, error: orderErr } = await supabase
-      .from("orders")
-      .insert({
-        order_type: "product",
-        food_mode: null,
-        customer_id: userId,
-        vendor_id: vendorId,
-        status: "pending_payment",
-        subtotal,
-        delivery_fee: DELIVERY_FEE,
-        total,
-        total_amount: total,
-        delivery_address: deliveryAddressPayload,
-        delivery_address_source: "manual",
-        customer_phone: phoneClean,
-        notes: notesPayload ? notesPayload : null,
-      })
-      .select("id")
-      .single();
-
-    if (orderErr || !order) {
-      setLoading(false);
-      setMsg("Order error: " + (orderErr?.message ?? "unknown"));
-      return;
+    const vendorMap = new Map<string, ProductCartItem[]>();
+    for (const it of items) {
+      const v = String(it.vendorId || "").trim();
+      if (!v) {
+        setLoading(false);
+        setMsg("Vendor missing for one or more products. Please re-add items.");
+        return;
+      }
+      const arr = vendorMap.get(v) ?? [];
+      arr.push(it);
+      vendorMap.set(v, arr);
     }
 
-    const rows = items.map((it) => ({
-      order_id: order.id,
-      product_id: it.productId,
-      qty: it.qty,
-      unit_price: it.price,
-      line_total: it.qty * it.price,
-    }));
+    const createdOrderIds: string[] = [];
 
-    const { error: itemsErr } = await supabase.from("order_items").insert(rows);
+    for (const [vendorId, vendorItems] of vendorMap.entries()) {
+      const vendorSubtotal = vendorItems.reduce((sum, it) => sum + Number(it.price) * Number(it.qty), 0);
+      const vendorTotal = vendorSubtotal + DELIVERY_FEE;
 
-    if (itemsErr) {
-      setLoading(false);
-      setMsg("Order items error: " + itemsErr.message);
-      return;
+      const { data: order, error: orderErr } = await supabase
+        .from("orders")
+        .insert({
+          order_type: "product",
+          food_mode: null,
+          customer_id: userId,
+          vendor_id: vendorId,
+          status: "pending_payment",
+          subtotal: vendorSubtotal,
+          delivery_fee: DELIVERY_FEE,
+          total: vendorTotal,
+          total_amount: vendorTotal,
+          delivery_address: deliveryAddressPayload,
+          delivery_address_source: "manual",
+          customer_phone: phoneClean,
+          notes: notesPayload ? notesPayload : null,
+        })
+        .select("id")
+        .single();
+
+      if (orderErr || !order) {
+        setLoading(false);
+        setMsg("Order error: " + (orderErr?.message ?? "unknown"));
+        return;
+      }
+
+      const rows = vendorItems.map((it) => ({
+        order_id: order.id,
+        product_id: it.productId,
+        qty: it.qty,
+        unit_price: it.price,
+        line_total: it.qty * it.price,
+      }));
+
+      const { error: itemsErr } = await supabase.from("order_items").insert(rows);
+      if (itemsErr) {
+        await supabase.from("orders").delete().eq("id", order.id);
+        setLoading(false);
+        setMsg("Order items error: " + itemsErr.message);
+        return;
+      }
+
+      createdOrderIds.push(order.id);
     }
 
     localStorage.removeItem(CART_KEY);
-
     setLoading(false);
-    router.push(`/food/pay?orderId=${order.id}`);
+
+    if (createdOrderIds.length === 1) {
+      router.push(`/food/pay?orderId=${createdOrderIds[0]}`);
+      return;
+    }
+
+    router.push("/orders");
   }
 
   if (loading) return <main className="p-6">Loading...</main>;
@@ -231,7 +255,8 @@ export default function ProductCheckoutPage() {
     <main className="mx-auto max-w-2xl p-4">
       <h1 className="text-xl font-bold sm:text-2xl">Checkout</h1>
 
-      {vendorName ? <p className="mt-2 text-gray-600">Vendor: {vendorName}</p> : null}
+      {vendorCount === 1 && vendorName ? <p className="mt-2 text-gray-600">Vendor: {vendorName}</p> : null}
+      {vendorCount > 1 ? <p className="mt-2 text-gray-600">Vendors: {vendorCount}</p> : null}
 
       <section className="mt-4 rounded-2xl border bg-white p-4">
         <h2 className="font-semibold">Your items</h2>
@@ -259,8 +284,8 @@ export default function ProductCheckoutPage() {
         </div>
 
         <div className="flex justify-between">
-          <span>Delivery fee</span>
-          <span className="font-semibold">{formatNaira(items.length ? DELIVERY_FEE : 0)}</span>
+          <span>Delivery fee ({vendorCount} vendor{vendorCount === 1 ? "" : "s"})</span>
+          <span className="font-semibold">{formatNaira(deliveryFee)}</span>
         </div>
 
         <div className="mt-2 flex justify-between text-lg">
