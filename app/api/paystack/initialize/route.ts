@@ -24,6 +24,15 @@ function genRef(orderId: string) {
   return `dashbuy_${orderId}_${Date.now()}`;
 }
 
+function isLocalUrl(url: string) {
+  const lower = url.toLowerCase();
+  return lower.includes("localhost") || lower.includes("127.0.0.1");
+}
+
+function trimTrailingSlash(url: string) {
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Partial<Body>;
@@ -66,9 +75,20 @@ export async function POST(req: Request) {
 
     const reference = asText(order.paystack_reference).trim() || genRef(orderId);
 
-    const baseUrl = asText(process.env.NEXT_PUBLIC_SITE_URL).trim();
+    const envBase = asText(process.env.NEXT_PUBLIC_SITE_URL).trim();
+    const xfProto = asText(req.headers.get("x-forwarded-proto")).trim() || "https";
+    const xfHost = asText(req.headers.get("x-forwarded-host")).trim();
+    const host = xfHost || asText(req.headers.get("host")).trim();
+
+    const inferredBase = host ? `${xfProto}://${host}` : "";
+    const useEnvBase = envBase && !isLocalUrl(envBase);
+    const baseUrl = trimTrailingSlash(useEnvBase ? envBase : inferredBase);
+
     if (!baseUrl) {
-      return NextResponse.json({ ok: false, error: "NEXT_PUBLIC_SITE_URL missing in env" }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: "Unable to resolve callback base URL. Set NEXT_PUBLIC_SITE_URL in Vercel env." },
+        { status: 500 }
+      );
     }
 
     const callbackUrl = `${baseUrl}/food/pay/callback?orderId=${orderId}`;

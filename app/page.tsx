@@ -8,9 +8,11 @@ import { supabase } from "@/lib/supabaseClient";
 
 type ProductRow = {
   id: string;
+  vendor_id: string;
   name: string;
   price: number;
   category: string | null;
+  description: string | null;
   image_path: string | null;
   created_at: string;
   profiles: { full_name: string; store_name: string | null } | null;
@@ -18,9 +20,11 @@ type ProductRow = {
 
 type RawProductRow = {
   id: string;
+  vendor_id: string;
   name: string;
   price: number;
   category: string | null;
+  description: string | null;
   image_path: string | null;
   created_at: string;
   profiles:
@@ -29,10 +33,35 @@ type RawProductRow = {
     | null;
 };
 
+type CartItem = {
+  productId: string;
+  name: string;
+  price: number;
+  qty: number;
+  vendorId: string;
+  vendorName?: string | null;
+};
+
+const CART_KEY = "dashbuy_products_cart_v1";
+
 function getPublicImageUrl(path: string | null) {
   if (!path) return null;
   const { data } = supabase.storage.from("product-images").getPublicUrl(path);
   return data?.publicUrl ?? null;
+}
+
+function readCart(): { items: CartItem[] } {
+  if (typeof window === "undefined") return { items: [] };
+  try {
+    const raw = localStorage.getItem(CART_KEY);
+    return raw ? JSON.parse(raw) : { items: [] };
+  } catch {
+    return { items: [] };
+  }
+}
+
+function writeCart(cart: { items: CartItem[] }) {
+  localStorage.setItem(CART_KEY, JSON.stringify(cart));
 }
 
 function naira(n: number) {
@@ -43,6 +72,10 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [productsErr, setProductsErr] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeProduct, setActiveProduct] = useState<ProductRow | null>(null);
+  const [qty, setQty] = useState(1);
+  const [cartMsg, setCartMsg] = useState("");
 
   function vendorLabel(p: ProductRow) {
     const store = (p.profiles?.store_name ?? "").trim();
@@ -50,6 +83,57 @@ export default function HomePage() {
     const full = (p.profiles?.full_name ?? "").trim();
     if (full) return full;
     return "";
+  }
+
+  function openDrawer(p: ProductRow) {
+    setActiveProduct(p);
+    setQty(1);
+    setDrawerOpen(true);
+  }
+
+  async function addToCart() {
+    if (!activeProduct) return;
+
+    const { data: u } = await supabase.auth.getUser();
+    const user = u.user;
+
+    if (!user) {
+      setCartMsg("Please login first at /auth");
+      setDrawerOpen(false);
+      return;
+    }
+
+    const vendorId = String(activeProduct.vendor_id ?? "").trim();
+    if (!vendorId) {
+      setCartMsg("Vendor missing for this product");
+      setDrawerOpen(false);
+      return;
+    }
+
+    if (vendorId === user.id) {
+      setCartMsg("You cannot add your own product to cart");
+      setDrawerOpen(false);
+      return;
+    }
+
+    const cart = readCart();
+    const existing = cart.items.find((x) => x.productId === activeProduct.id);
+
+    if (existing) existing.qty += qty;
+    else {
+      cart.items.push({
+        productId: activeProduct.id,
+        name: activeProduct.name,
+        price: Number(activeProduct.price),
+        qty,
+        vendorId,
+        vendorName: vendorLabel(activeProduct),
+      });
+    }
+
+    writeCart(cart);
+    setCartMsg("Added to cart");
+    setDrawerOpen(false);
   }
 
   useEffect(() => {
@@ -76,7 +160,7 @@ export default function HomePage() {
 
       const { data, error } = await supabase
         .from("products")
-        .select("id,name,price,category,image_path,created_at,profiles:vendor_id(full_name,store_name)")
+        .select("id,vendor_id,name,price,category,description,image_path,created_at,profiles:vendor_id(full_name,store_name)")
         .eq("is_available", true)
         .order("created_at", { ascending: false })
         .limit(8);
@@ -89,9 +173,11 @@ export default function HomePage() {
           const p = Array.isArray(r.profiles) ? (r.profiles[0] ?? null) : r.profiles;
           return {
             id: r.id,
+            vendor_id: r.vendor_id,
             name: r.name,
             price: Number(r.price ?? 0),
             category: r.category,
+            description: r.description,
             image_path: r.image_path,
             created_at: r.created_at,
             profiles: p
@@ -183,6 +269,10 @@ export default function HomePage() {
           </Link>
         </div>
 
+        {cartMsg ? (
+          <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-green-700">{cartMsg}</div>
+        ) : null}
+
         {loading ? (
           <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600">Loading products...</div>
         ) : productsErr ? (
@@ -195,10 +285,11 @@ export default function HomePage() {
               const img = getPublicImageUrl(p.image_path);
 
               return (
-                <a
+                <button
                   key={p.id}
-                  href={`/products/${p.id}`}
-                  className="overflow-hidden rounded-2xl border bg-white hover:bg-gray-50"
+                  onClick={() => openDrawer(p)}
+                  className="overflow-hidden rounded-2xl border bg-white text-left hover:bg-gray-50"
+                  type="button"
                 >
                   <div className="h-24 w-full bg-gray-100">
                     {img ? (
@@ -215,12 +306,78 @@ export default function HomePage() {
                     </p>
                     <p className="mt-2 font-bold">{naira(p.price)}</p>
                   </div>
-                </a>
+                </button>
               );
             })}
           </div>
         )}
       </div>
+
+      {drawerOpen && activeProduct ? (
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
+          <div className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-white p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold">{activeProduct.name}</p>
+                <p className="text-sm text-gray-600">{naira(activeProduct.price)}</p>
+              </div>
+              <button className="text-sm text-gray-600 underline" onClick={() => setDrawerOpen(false)} type="button">
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-2xl border p-3">
+              <div className="aspect-[4/3] overflow-hidden rounded-xl bg-gray-100">
+                {getPublicImageUrl(activeProduct.image_path) ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={getPublicImageUrl(activeProduct.image_path) ?? ""}
+                    alt={activeProduct.name}
+                    className="h-full w-full object-cover"
+                  />
+                ) : null}
+              </div>
+
+              <div className="mt-3 grid gap-1 text-sm">
+                <p>
+                  <span className="text-gray-500">Vendor:</span> {vendorLabel(activeProduct)}
+                </p>
+                <p>
+                  <span className="text-gray-500">Category:</span> {activeProduct.category ?? "Product"}
+                </p>
+                <p>
+                  <span className="text-gray-500">Price:</span> {naira(activeProduct.price)}
+                </p>
+              </div>
+
+              <div className="mt-3">
+                <p className="text-sm font-medium">Description</p>
+                <p className="mt-1 text-sm text-gray-600">
+                  {activeProduct.description?.trim() ? activeProduct.description : "No description yet."}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between rounded-2xl border p-3">
+              <span className="text-sm font-medium">Quantity</span>
+              <div className="flex items-center gap-2">
+                <button className="rounded-lg border px-3 py-1" onClick={() => setQty((q) => Math.max(1, q - 1))} type="button">
+                  -
+                </button>
+                <span className="w-8 text-center">{qty}</span>
+                <button className="rounded-lg border px-3 py-1" onClick={() => setQty((q) => q + 1)} type="button">
+                  +
+                </button>
+              </div>
+            </div>
+
+            <button className="mt-4 w-full rounded-xl bg-black px-4 py-3 text-white" onClick={addToCart} type="button">
+              Add to cart • {naira(activeProduct.price * qty)}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-6 rounded-2xl border bg-white p-4">
         <h3 className="font-semibold">Sell on Dashbuy</h3>

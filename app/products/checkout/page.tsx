@@ -16,8 +16,20 @@ type ProductCartItem = {
   vendorName: string;
 };
 
+type GeoPoint = {
+  lat: number;
+  lng: number;
+  accuracy: number | null;
+};
+
 function formatNaira(n: number) {
   return `₦${Math.round(Number(n) || 0).toLocaleString()}`;
+}
+
+function formatGeoPoint(g: GeoPoint) {
+  const base = `${g.lat.toFixed(6)}, ${g.lng.toFixed(6)}`;
+  if (g.accuracy && Number.isFinite(g.accuracy)) return `${base} (+/-${Math.round(g.accuracy)}m)`;
+  return base;
 }
 
 function readCart(): { vendorId: string | null; items: ProductCartItem[] } {
@@ -50,6 +62,8 @@ export default function ProductCheckoutPage() {
   const [vendorName, setVendorName] = useState("");
 
   const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [geoPoint, setGeoPoint] = useState<GeoPoint | null>(null);
+  const [locating, setLocating] = useState(false);
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -79,6 +93,38 @@ export default function ProductCheckoutPage() {
     })();
   }, []);
 
+  async function captureGeoPoint() {
+    if (typeof window === "undefined" || !("geolocation" in navigator)) {
+      setMsg("Geolocation is not available on this device/browser.");
+      return;
+    }
+
+    setLocating(true);
+    setMsg("");
+
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        });
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 1800));
+
+      setGeoPoint({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null,
+      });
+    } catch {
+      setMsg("Unable to get your location. Allow location access and try again.");
+    } finally {
+      setLocating(false);
+    }
+  }
+
   async function placeOrder() {
     setMsg("");
 
@@ -88,12 +134,11 @@ export default function ProductCheckoutPage() {
     }
 
     const addr = deliveryAddress.trim();
-    if (!addr) {
-      setMsg("Enter delivery address.");
+    if (!addr && !geoPoint) {
+      setMsg("Enter delivery address or extract your location before placing order.");
       return;
     }
-
-    if (addr.length < 10) {
+    if (addr && addr.length < 10) {
       setMsg("Please include good address details for fast delivery, for example house number, street, area, landmark.");
       return;
     }
@@ -120,6 +165,16 @@ export default function ProductCheckoutPage() {
       return;
     }
 
+    const geoText = geoPoint ? `GPS: ${formatGeoPoint(geoPoint)}` : "";
+    const hasAddr = addr.length > 0;
+    const hasGeo = !!geoPoint;
+    const deliveryAddressPayload = hasAddr && hasGeo ? `${addr} | ${geoText}` : hasAddr ? addr : geoText;
+    const sourceText = hasAddr && hasGeo ? "manual address + geopoint" : hasGeo ? "geopoint" : "manual address";
+
+    const notesPayload = [notes.trim(), `Location source: ${sourceText}`]
+      .filter((x) => x.length > 0)
+      .join(" | ");
+
     setLoading(true);
 
     const { data: order, error: orderErr } = await supabase
@@ -134,10 +189,10 @@ export default function ProductCheckoutPage() {
         delivery_fee: DELIVERY_FEE,
         total,
         total_amount: total,
-        delivery_address: addr,
+        delivery_address: deliveryAddressPayload,
         delivery_address_source: "manual",
         customer_phone: phoneClean,
-        notes: notes.trim() ? notes.trim() : null,
+        notes: notesPayload ? notesPayload : null,
       })
       .select("id")
       .single();
@@ -173,12 +228,12 @@ export default function ProductCheckoutPage() {
   if (loading) return <main className="p-6">Loading...</main>;
 
   return (
-    <main className="p-6 max-w-3xl">
+    <main className="mx-auto max-w-2xl p-4">
       <h1 className="text-xl font-bold sm:text-2xl">Checkout</h1>
 
       {vendorName ? <p className="mt-2 text-gray-600">Vendor: {vendorName}</p> : null}
 
-      <section className="mt-6 rounded border p-4">
+      <section className="mt-4 rounded-2xl border bg-white p-4">
         <h2 className="font-semibold">Your items</h2>
 
         {items.length === 0 ? (
@@ -214,15 +269,34 @@ export default function ProductCheckoutPage() {
         </div>
       </section>
 
-      <section className="mt-6 rounded border p-4">
+      <section className="mt-6 rounded-2xl border bg-white p-4">
         <h2 className="font-semibold">Delivery details</h2>
 
         <p className="mt-2 text-sm text-gray-600">
-          Please include good address details for fast delivery. Add house number, street, area, closest landmark, and a
-          phone number that will be reachable.
+          Do not use location capture if you are not within the delivery area. Enter your delivery address and capture your exact location.
         </p>
 
         <div className="mt-4 grid gap-3">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+            <label className="text-sm font-medium text-blue-900">Exact geopoint</label>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="rounded border border-blue-300 bg-white px-3 py-2 text-sm text-blue-900"
+                onClick={captureGeoPoint}
+                disabled={locating}
+              >
+                {locating ? "Extracting location..." : "Use my current location"}
+              </button>
+              {geoPoint ? (
+                <span className="inline-flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-sm text-emerald-800">
+                  <span className="h-2 w-2 rounded-full bg-emerald-600" />
+                  Location extracted
+                </span>
+              ) : null}
+            </div>
+          </div>
+
           <div>
             <label className="text-sm font-medium">Delivery address</label>
             <textarea

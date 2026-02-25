@@ -146,25 +146,40 @@ export default function OrdersPage() {
         <div className="mt-4 rounded-2xl border bg-white p-5 text-sm text-gray-600">No orders yet.</div>
       ) : (
         <div className="mt-4 grid gap-3">
-          {orders.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              onClick={() => router.push(`/orders/${o.id}`)}
-              className="rounded-2xl border bg-white p-4 text-left hover:bg-gray-50"
-            >
-              <div className="flex items-center justify-between">
-                <p className="font-semibold">{labelForOrder(o)}</p>
-                <p className="font-bold">{naira(o.total ?? 0)}</p>
-              </div>
+          {orders.map((o) => {
+            const isPendingPayment = (o.status ?? "").toLowerCase() === "pending_payment";
 
-              <div className="mt-1 flex items-center justify-between text-sm text-gray-600">
-                <span>{friendlyStatus(o.status)}</span>
-                <span>{fmtDate(o.created_at)}</span>
+            return (
+              <div key={o.id} className="rounded-2xl border bg-white p-4">
+                <button
+                  type="button"
+                  onClick={() => router.push(`/orders/${o.id}`)}
+                  className="w-full text-left"
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold">{labelForOrder(o)}</p>
+                    <p className="font-bold">{naira(o.total ?? 0)}</p>
+                  </div>
+
+                  <div className="mt-1 flex items-center justify-between text-sm text-gray-600">
+                    <span>{friendlyStatus(o.status)}</span>
+                    <span>{fmtDate(o.created_at)}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">{typeForOrder(o)}</p>
+                </button>
+
+                {isPendingPayment ? (
+                  <button
+                    type="button"
+                    className="mt-3 rounded-xl bg-black px-4 py-2 text-sm text-white"
+                    onClick={() => router.push(`/food/pay?orderId=${o.id}`)}
+                  >
+                    Continue payment
+                  </button>
+                ) : null}
               </div>
-              <p className="mt-1 text-xs text-gray-500">{typeForOrder(o)}</p>
-            </button>
-          ))}
+            );
+          })}
         </div>
       )}
 

@@ -372,6 +372,38 @@ export default function ProductsPage() {
               </button>
             </div>
 
+            <div className="mt-4 rounded-2xl border p-3">
+              <div className="aspect-[4/3] overflow-hidden rounded-xl bg-gray-100">
+                {getPublicImageUrl(activeProduct.image_path) ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={getPublicImageUrl(activeProduct.image_path) ?? ""}
+                    alt={activeProduct.name}
+                    className="h-full w-full object-cover"
+                  />
+                ) : null}
+              </div>
+
+              <div className="mt-3 grid gap-1 text-sm">
+                <p>
+                  <span className="text-gray-500">Vendor:</span> {vendorLabel(activeProduct)}
+                </p>
+                <p>
+                  <span className="text-gray-500">Category:</span> {activeProduct.category ?? "Product"}
+                </p>
+                <p>
+                  <span className="text-gray-500">Price:</span> {naira(activeProduct.price)}
+                </p>
+              </div>
+
+              <div className="mt-3">
+                <p className="text-sm font-medium">Description</p>
+                <p className="mt-1 text-sm text-gray-600">
+                  {activeProduct.description?.trim() ? activeProduct.description : "No description yet."}
+                </p>
+              </div>
+            </div>
+
             <div className="mt-4 flex items-center justify-between rounded-2xl border p-3">
               <span className="text-sm font-medium">Quantity</span>
               <div className="flex items-center gap-2">
@@ -397,13 +429,6 @@ export default function ProductsPage() {
               Add to cart • {naira(activeProduct.price * qty)}
             </button>
 
-            <button
-              className="mt-3 w-full rounded-xl border px-4 py-3"
-              onClick={() => router.push("/products/cart")}
-              type="button"
-            >
-              Go to cart →
-            </button>
           </div>
         </div>
       ) : null}
