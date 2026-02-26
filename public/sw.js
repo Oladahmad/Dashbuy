@@ -1,5 +1,5 @@
 const CACHE_NAME = "dashbuy-static-v1";
-const STATIC_ASSETS = ["/", "/manifest.webmanifest", "/favicon.ico", "/logo.png"];
+const STATIC_ASSETS = ["/", "/manifest.webmanifest", "/favicon.ico", "/logo.png", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
