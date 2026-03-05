@@ -36,6 +36,7 @@ export default function VendorProductsPage() {
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -54,6 +55,7 @@ export default function VendorProductsPage() {
         }
         return;
       }
+      setUserId(user.id);
 
       const { data, error } = await supabase
         .from("products")
@@ -84,13 +86,19 @@ export default function VendorProductsPage() {
     setErr(null);
     setActionId(id);
 
-    const { error } = await supabase
+    const { error, count } = await supabase
       .from("products")
-      .update({ is_available: nextAvailable })
-      .eq("id", id);
+      .update({ is_available: nextAvailable }, { count: "exact" })
+      .eq("id", id)
+      .eq("vendor_id", userId ?? "");
 
     if (error) {
       setErr(error.message);
+      setActionId(null);
+      return;
+    }
+    if ((count ?? 0) < 1) {
+      setErr("No product updated. You may not have permission for this item.");
       setActionId(null);
       return;
     }
@@ -106,9 +114,18 @@ export default function VendorProductsPage() {
     setErr(null);
     setActionId(id);
 
-    const { error } = await supabase.from("products").delete().eq("id", id);
+    const { error, count } = await supabase
+      .from("products")
+      .delete({ count: "exact" })
+      .eq("id", id)
+      .eq("vendor_id", userId ?? "");
     if (error) {
       setErr(error.message);
+      setActionId(null);
+      return;
+    }
+    if ((count ?? 0) < 1) {
+      setErr("No product deleted. You may not have permission for this item.");
       setActionId(null);
       return;
     }

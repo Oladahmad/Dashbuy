@@ -55,7 +55,7 @@ export default function VendorShell({
               const active = isActive(it.href);
               return (
                 <Link
-                  key={it.href}
+                  key={`${it.href}:${it.label}`}
                   href={it.href}
                   prefetch={false}
                   className={`rounded-xl px-3 py-3 text-center text-sm border ${

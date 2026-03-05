@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import OrderTimeline from "@/components/OrderTimeline";
+import { resolveTrackingStatus } from "@/lib/orderTracking";
 
 type OrderRow = {
   id: string;
@@ -200,8 +202,7 @@ export default function VendorOrderDetailsPage() {
         .eq("order_id", o.id)
         .maybeSingle<{ status: string | null }>();
 
-      const effectiveStatus =
-        (job?.status ?? "").toLowerCase() === "delivered" ? "delivered" : o.status;
+      const effectiveStatus = resolveTrackingStatus(o.status, job?.status ?? null);
       setOrder({ ...o, status: effectiveStatus });
 
       if (o.order_type === "product") {
@@ -285,6 +286,44 @@ export default function VendorOrderDetailsPage() {
     return () => {
       alive = false;
       sub.subscription.unsubscribe();
+    };
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+
+    let alive = true;
+
+    async function refreshTracking() {
+      const { data: o } = await supabase.from("orders").select("status").eq("id", id).maybeSingle<{ status: string | null }>();
+      const { data: j } = await supabase
+        .from("logistics_jobs")
+        .select("status")
+        .eq("order_id", id)
+        .maybeSingle<{ status: string | null }>();
+
+      if (!alive) return;
+
+      const nextStatus = resolveTrackingStatus(o?.status ?? null, j?.status ?? null);
+      setOrder((prev) => (prev ? { ...prev, status: nextStatus } : prev));
+    }
+
+    const channel = supabase
+      .channel(`order-tracking-vendor-${id}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${id}` }, refreshTracking)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "logistics_jobs", filter: `order_id=eq.${id}` },
+        refreshTracking
+      )
+      .subscribe();
+
+    const timer = setInterval(refreshTracking, 15000);
+
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      supabase.removeChannel(channel);
     };
   }, [id]);
 
@@ -535,42 +574,42 @@ export default function VendorOrderDetailsPage() {
             ) : null}
           </div>
 
+          <OrderTimeline status={order.status} />
+
           <div className="rounded-2xl border bg-white p-4">
             <p className="font-semibold">Items</p>
             <div className="mt-3">{renderItems()}</div>
           </div>
 
-          <div className="rounded-2xl border bg-white p-4">
-            <p className="font-semibold">Vendor action</p>
+            {canVendorAct(order.status) ? (
+              <div className="rounded-2xl border bg-white p-4">
+                <p className="font-semibold">Vendor action</p>
 
-            {!canVendorAct(order.status) ? (
-              <p className="mt-2 text-sm text-gray-600">You can only accept or reject when the status is pending_vendor.</p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl bg-black px-4 py-3 text-white disabled:opacity-50"
+                    disabled={saving}
+                    onClick={acceptOrder}
+                  >
+                    {saving ? "Saving..." : "Accept"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="rounded-xl border px-4 py-3 disabled:opacity-50"
+                    disabled={saving}
+                    onClick={() => updateStatus("rejected")}
+                  >
+                    Reject
+                  </button>
+                </div>
+
+                <p className="mt-3 text-xs text-gray-600">
+                  Accept will create a logistics job with vendor and customer snapshot, then set order status to accepted.
+                </p>
+              </div>
             ) : null}
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className="rounded-xl bg-black px-4 py-3 text-white disabled:opacity-50"
-                disabled={saving || !canVendorAct(order.status)}
-                onClick={acceptOrder}
-              >
-                {saving ? "Saving…" : "Accept"}
-              </button>
-
-              <button
-                type="button"
-                className="rounded-xl border px-4 py-3 disabled:opacity-50"
-                disabled={saving || !canVendorAct(order.status)}
-                onClick={() => updateStatus("rejected")}
-              >
-                Reject
-              </button>
-            </div>
-
-            <p className="mt-3 text-xs text-gray-600">
-              Accept will create a logistics job with vendor and customer snapshot, then set order status to accepted.
-            </p>
-          </div>
         </>
       )}
     </div>

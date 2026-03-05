@@ -6,7 +6,7 @@ export async function GET() {
     const { data, error } = await supabaseAdmin
       .from("products")
       .select(
-        "id,vendor_id,name,price,category,description,image_path,created_at,profiles:vendor_id(full_name,store_name)"
+        "id,vendor_id,name,price,category,description,image_path,created_at,profiles:profiles!products_vendor_id_fkey(full_name,store_name)"
       )
       .eq("is_available", true)
       .order("created_at", { ascending: false });

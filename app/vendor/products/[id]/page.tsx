@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { PRODUCT_CATEGORIES, normalizeProductCategory } from "@/lib/productCategories";
 
 type Role = "customer" | "vendor_food" | "vendor_products" | "logistics" | "admin";
 
@@ -102,9 +103,10 @@ export default function VendorProductDetailsPage() {
 
     const q = toIntOrNull(stockQty);
     if (q === null) return false;
+    if (!category) return false;
 
     return true;
-  }, [editing, name, price, stockQty]);
+  }, [editing, name, price, stockQty, category]);
 
   useEffect(() => {
     let alive = true;
@@ -187,7 +189,7 @@ export default function VendorProductDetailsPage() {
       setName(p.name ?? "");
       setPrice(String(safeNumber(p.price, 0)));
       setStockQty(String(safeNumber(p.stock_qty, 0)));
-      setCategory(p.category ?? "");
+      setCategory(normalizeProductCategory(p.category));
       setDesc(p.description ?? "");
       setFile(null);
 
@@ -210,16 +212,22 @@ export default function VendorProductDetailsPage() {
 
     const next = !Boolean(product.is_available);
 
-    const { data, error } = await supabase
+    const { data, error, count } = await supabase
       .from("products")
-      .update({ is_available: next })
+      .update({ is_available: next }, { count: "exact" })
       .eq("id", product.id)
+      .eq("vendor_id", product.vendor_id)
       .select("id,is_available")
       .maybeSingle<{ id: string; is_available: boolean | null }>();
 
     if (error) {
       setSaving(false);
       setMsg(error.message);
+      return;
+    }
+    if ((count ?? 0) < 1) {
+      setSaving(false);
+      setMsg("No product updated. You may not have permission for this item.");
       return;
     }
 
@@ -240,6 +248,7 @@ export default function VendorProductDetailsPage() {
 
     const q = toIntOrNull(stockQty);
     if (q === null) return setMsg("Enter a valid stock quantity");
+    if (!category) return setMsg("Select a category");
 
     setSaving(true);
 
@@ -268,15 +277,16 @@ export default function VendorProductDetailsPage() {
       name: clean(name),
       price: p,
       stock_qty: q,
-      category: clean(category) ? clean(category) : null,
+      category: normalizeProductCategory(category),
       description: clean(desc) ? clean(desc) : null,
       image_path: nextImagePath,
     };
 
-    const { data, error } = await supabase
+    const { data, error, count } = await supabase
       .from("products")
-      .update(payload)
+      .update(payload, { count: "exact" })
       .eq("id", product.id)
+      .eq("vendor_id", product.vendor_id)
       .select("id,vendor_id,name,description,price,stock_qty,is_available,created_at,category,image_path")
       .maybeSingle<ProductRow>();
 
@@ -285,8 +295,29 @@ export default function VendorProductDetailsPage() {
       setMsg(error.message);
       return;
     }
-
-    setProduct(data ?? product);
+    if ((count ?? 0) < 1) {
+      setSaving(false);
+      setMsg("No product updated. You may not have permission for this item.");
+      return;
+    }
+    if (data) {
+      setProduct(data);
+    } else {
+      // Under RLS, update can succeed with empty RETURNING when select policy is restricted.
+      setProduct((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: clean(name),
+              price: p,
+              stock_qty: q,
+              category: normalizeProductCategory(category),
+              description: clean(desc) ? clean(desc) : null,
+              image_path: nextImagePath,
+            }
+          : prev
+      );
+    }
     setEditing(false);
     setFile(null);
     setSaving(false);
@@ -304,14 +335,22 @@ export default function VendorProductDetailsPage() {
     setSaving(true);
     setMsg(null);
 
-    const { error } = await supabase.from("products").delete().eq("id", product.id);
+    const { error, count } = await supabase
+      .from("products")
+      .delete({ count: "exact" })
+      .eq("id", product.id)
+      .eq("vendor_id", product.vendor_id);
 
     if (error) {
       setSaving(false);
       setMsg(error.message);
       return;
     }
-
+    if ((count ?? 0) < 1) {
+      setSaving(false);
+      setMsg("No product deleted. You may not have permission for this item.");
+      return;
+    }
     setSaving(false);
     router.push("/vendor/products");
   }
@@ -369,7 +408,7 @@ export default function VendorProductDetailsPage() {
 
                 <div className="rounded-xl border p-3">
                   <p className="text-xs text-gray-600">Category</p>
-                  <p className="text-sm">{(product.category ?? "").trim() ? product.category : "None"}</p>
+                  <p className="text-sm">{normalizeProductCategory(product.category)}</p>
                 </div>
               </div>
 
@@ -407,7 +446,7 @@ export default function VendorProductDetailsPage() {
                       setName(product.name ?? "");
                       setPrice(String(safeNumber(product.price, 0)));
                       setStockQty(String(safeNumber(product.stock_qty, 0)));
-                      setCategory(product.category ?? "");
+                      setCategory(normalizeProductCategory(product.category));
                       setDesc(product.description ?? "");
                     }
                   }}
@@ -453,12 +492,19 @@ export default function VendorProductDetailsPage() {
 
                   <div>
                     <label className="text-sm text-gray-700">Category</label>
-                    <input
+                    <select
                       className="mt-1 w-full rounded-xl border px-3 py-3"
                       value={category}
                       onChange={(e) => setCategory(e.target.value)}
                       disabled={saving}
-                    />
+                      required
+                    >
+                      {PRODUCT_CATEGORIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>

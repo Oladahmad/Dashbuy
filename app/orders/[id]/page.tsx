@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
+import OrderTimeline from "@/components/OrderTimeline";
 import { supabase } from "@/lib/supabaseClient";
+import { resolveTrackingStatus } from "@/lib/orderTracking";
 import { useParams, useRouter } from "next/navigation";
 
 type OrderRow = {
@@ -131,8 +133,7 @@ export default function OrderDetailsPage() {
         .eq("order_id", ord.id)
         .maybeSingle<{ status: string | null }>();
 
-      const effectiveStatus =
-        (job?.status ?? "").toLowerCase() === "delivered" ? "delivered" : ord.status;
+      const effectiveStatus = resolveTrackingStatus(ord.status, job?.status ?? null);
       setOrder({ ...ord, status: effectiveStatus });
 
       const { data: vp, error: vErr } = await supabase
@@ -221,6 +222,44 @@ export default function OrderDetailsPage() {
     })();
   }, [id, router]);
 
+  useEffect(() => {
+    if (!id) return;
+
+    let alive = true;
+
+    async function refreshTracking() {
+      const { data: o } = await supabase.from("orders").select("status").eq("id", id).maybeSingle<{ status: string | null }>();
+      const { data: j } = await supabase
+        .from("logistics_jobs")
+        .select("status")
+        .eq("order_id", id)
+        .maybeSingle<{ status: string | null }>();
+
+      if (!alive) return;
+
+      const nextStatus = resolveTrackingStatus(o?.status ?? null, j?.status ?? null);
+      setOrder((prev) => (prev ? { ...prev, status: nextStatus } : prev));
+    }
+
+    const channel = supabase
+      .channel(`order-tracking-customer-${id}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${id}` }, refreshTracking)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "logistics_jobs", filter: `order_id=eq.${id}` },
+        refreshTracking
+      )
+      .subscribe();
+
+    const timer = setInterval(refreshTracking, 15000);
+
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [id]);
+
   const grouped = useMemo(() => {
     if (!order) return [];
     const vendor = vendorName || "Vendor";
@@ -259,6 +298,10 @@ export default function OrderDetailsPage() {
             </p>
 
             {order.paystack_reference ? <p className="mt-2 text-xs text-gray-500">Ref: {order.paystack_reference}</p> : null}
+          </div>
+
+          <div className="mt-4">
+            <OrderTimeline status={order.status} />
           </div>
 
           <div className="mt-4 rounded-2xl border bg-white p-5">

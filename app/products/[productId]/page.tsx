@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { normalizeProductCategory } from "@/lib/productCategories";
 import { useParams, useRouter } from "next/navigation";
 
 type ProfileLite = {
@@ -140,7 +141,7 @@ export default function ProductDetailsPage() {
         Sold by: <span className="font-medium">{vendorDisplayName}</span>
       </p>
 
-      <p className="mt-2 text-sm text-gray-600">{p.category ?? "Uncategorized"}</p>
+      <p className="mt-2 text-sm text-gray-600">{normalizeProductCategory(p.category)}</p>
 
       <p className="mt-4 text-xl font-bold sm:text-2xl">{naira(p.price)}</p>
 

@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { supabase } from "@/lib/supabaseClient";
+import { PRODUCT_CATEGORIES, normalizeProductCategory } from "@/lib/productCategories";
 import { useRouter } from "next/navigation";
 
 type Product = {
@@ -69,7 +70,6 @@ export default function ProductsPage() {
   const [msg, setMsg] = useState("");
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
 
   const [q, setQ] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -115,11 +115,6 @@ export default function ProductsPage() {
       const rows = Array.isArray(body.products) ? body.products : [];
       setProducts(rows);
 
-      const uniq = Array.from(
-        new Set(rows.map((p) => (p.category ?? "").trim()).filter(Boolean))
-      ).sort((a, b) => a.localeCompare(b));
-      setCategories(uniq);
-
       setLoading(false);
     })();
   }, []);
@@ -134,7 +129,7 @@ export default function ProductsPage() {
         const hay = `${p.name} ${p.description ?? ""} ${p.category ?? ""} ${vendorLabel(p)}`.toLowerCase();
         if (!hay.includes(qq)) return false;
       }
-      if (cat !== "all" && (p.category ?? "") !== cat) return false;
+      if (cat !== "all" && normalizeProductCategory(p.category) !== cat) return false;
       if (min !== null && !Number.isNaN(min) && Number(p.price) < min) return false;
       if (max !== null && !Number.isNaN(max) && Number(p.price) > max) return false;
       return true;
@@ -233,6 +228,32 @@ export default function ProductsPage() {
         </div>
       </div>
 
+      <div className="mt-3 -mx-1 overflow-x-auto">
+        <div className="flex flex-nowrap min-w-max items-center gap-2 px-1 pb-1">
+          <button
+            type="button"
+            onClick={() => setCat("all")}
+            className={`shrink-0 rounded-full border px-3 py-2 text-sm whitespace-nowrap ${
+              cat === "all" ? "bg-black text-white border-black" : "bg-white text-black"
+            }`}
+          >
+            All
+          </button>
+          {PRODUCT_CATEGORIES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCat(c)}
+              className={`shrink-0 rounded-full border px-3 py-2 text-sm whitespace-nowrap ${
+                cat === c ? "bg-black text-white border-black" : "bg-white text-black"
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {cartCount > 0 ? (
         <div className="mt-3 rounded-2xl border bg-white p-3 flex items-center justify-between">
           <p className="text-sm text-gray-700">
@@ -284,8 +305,8 @@ export default function ProductsPage() {
 
                 <div className="p-3">
                   <p className="text-sm font-semibold line-clamp-1">{p.name}</p>
-                  <p className="mt-1 text-xs text-gray-500 line-clamp-1">
-                    {p.category ?? "Product"} • {vName}
+                  <p className="mt-1 text-xs text-gray-500 whitespace-nowrap overflow-hidden text-ellipsis">
+                    {normalizeProductCategory(p.category)} - {vName}
                   </p>
                   <p className="mt-2 font-bold">{naira(Number(p.price ?? 0))}</p>
                 </div>
@@ -307,18 +328,6 @@ export default function ProductsPage() {
             </div>
 
             <div className="mt-4 grid gap-3">
-              <div>
-                <p className="text-sm font-medium">Category</p>
-                <select className="mt-2 w-full rounded-xl border p-3" value={cat} onChange={(e) => setCat(e.target.value)}>
-                  <option value="all">All categories</option>
-                  {categories.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <p className="text-sm font-medium">Min price</p>
@@ -389,7 +398,7 @@ export default function ProductsPage() {
                   <span className="text-gray-500">Vendor:</span> {vendorLabel(activeProduct)}
                 </p>
                 <p>
-                  <span className="text-gray-500">Category:</span> {activeProduct.category ?? "Product"}
+                  <span className="text-gray-500">Category:</span> {normalizeProductCategory(activeProduct.category)}
                 </p>
                 <p>
                   <span className="text-gray-500">Price:</span> {naira(activeProduct.price)}
@@ -435,3 +444,4 @@ export default function ProductsPage() {
     </AppShell>
   );
 }
+

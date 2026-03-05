@@ -36,7 +36,7 @@ function buildNav(role: Role) {
     { href: "/vendor", label: "Home" },
     { href: "/vendor/orders", label: "Orders" },
     { href: "/vendor/account", label: "Account" },
-    { href: "/vendor", label: "Menu" },
+    { href: "/vendor/about", label: "About" },
   ];
 }
 

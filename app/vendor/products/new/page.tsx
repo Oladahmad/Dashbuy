@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { PRODUCT_CATEGORIES, normalizeProductCategory } from "@/lib/productCategories";
 
 type Role = "customer" | "vendor_food" | "vendor_products" | "admin";
 
@@ -24,7 +25,7 @@ export default function VendorProductsNewPage() {
   const [price, setPrice] = useState("");
   const [stockQty, setStockQty] = useState("");
   const [desc, setDesc] = useState("");
-  const [category, setCategory] = useState("");
+  const [category, setCategory] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
 
   useEffect(() => {
@@ -76,6 +77,10 @@ export default function VendorProductsNewPage() {
       setErr("Please enter a valid price");
       return;
     }
+    if (!category) {
+      setErr("Please select a category");
+      return;
+    }
 
     setLoading(true);
 
@@ -110,7 +115,7 @@ export default function VendorProductsNewPage() {
       price: p,
       stock_qty: q ?? 0,
       is_available: true,
-      category: category.trim() || null,
+      category: normalizeProductCategory(category),
       image_path: path,
     };
 
@@ -121,6 +126,8 @@ export default function VendorProductsNewPage() {
       setErr(ins.error.message);
       return;
     }
+    // Under RLS, insert can succeed but RETURNING row can be empty without select policy.
+    // If no error, treat as success.
 
     setLoading(false);
     router.push("/vendor/products");
@@ -179,13 +186,22 @@ export default function VendorProductsNewPage() {
 
         <div>
           <label className="text-sm text-gray-700">Category</label>
-          <input
+          <select
             className="mt-1 w-full rounded-xl border px-3 py-3"
-            placeholder="Optional"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             disabled={!isAllowed}
-          />
+            required
+          >
+            <option value="" disabled>
+              Select category
+            </option>
+            {PRODUCT_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div>
