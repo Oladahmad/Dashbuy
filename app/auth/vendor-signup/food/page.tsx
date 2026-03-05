@@ -185,6 +185,14 @@ export default function FoodVendorSignupPage() {
             >
               {loading ? "Creating..." : "Create vendor account"}
             </button>
+
+            <button
+              type="button"
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              onClick={() => router.push("/auth/login?mode=vendor")}
+            >
+              Sign in
+            </button>
           </form>
         </div>
       </div>

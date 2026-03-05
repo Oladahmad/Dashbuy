@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import type { Viewport } from "next";
 import PwaRegister from "@/components/PwaRegister";
+import PwaPullToRefresh from "@/components/PwaPullToRefresh";
 
 export const metadata: Metadata = {
   title: "Dashbuy",
@@ -29,6 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <PwaRegister />
+        <PwaPullToRefresh />
         {children}
       </body>
     </html>

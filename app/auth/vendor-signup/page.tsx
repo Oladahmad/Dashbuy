@@ -15,6 +15,12 @@ export default function VendorSignupChoosePage() {
         >
           Back
         </button>
+        <button
+          onClick={() => router.push("/auth/login?mode=vendor")}
+          className="mb-6 ml-2 rounded-lg border px-3 py-2 text-sm"
+        >
+          Sign in
+        </button>
 
         <div className="rounded-2xl border bg-white p-6">
           <div className="mb-6 flex flex-col items-center">

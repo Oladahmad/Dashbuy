@@ -1,0 +1,95 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+
+function isStandalonePwa() {
+  if (typeof window === "undefined") return false;
+  const iosStandalone = (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+  const displayModeStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches === true;
+  return iosStandalone || displayModeStandalone;
+}
+
+export default function PwaPullToRefresh() {
+  const [enabled, setEnabled] = useState(false);
+  const [pull, setPull] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const startYRef = useRef<number | null>(null);
+  const activeRef = useRef(false);
+  const thresholdReachedRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const touchCapable = "ontouchstart" in window;
+    setEnabled(isStandalonePwa() && touchCapable);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled || refreshing) return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (window.scrollY > 0) return;
+      if (e.touches.length !== 1) return;
+      startYRef.current = e.touches[0].clientY;
+      activeRef.current = true;
+      thresholdReachedRef.current = false;
+      setPull(0);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!activeRef.current || startYRef.current === null) return;
+      const dy = e.touches[0].clientY - startYRef.current;
+      if (dy <= 0 || window.scrollY > 0) return;
+
+      const nextPull = Math.min(110, dy * 0.45);
+      thresholdReachedRef.current = nextPull >= 72;
+      setPull(nextPull);
+      e.preventDefault();
+    };
+
+    const onTouchEnd = () => {
+      if (!activeRef.current) return;
+      activeRef.current = false;
+      startYRef.current = null;
+
+      if (thresholdReachedRef.current) {
+        setRefreshing(true);
+        setPull(72);
+        window.location.reload();
+        return;
+      }
+
+      thresholdReachedRef.current = false;
+      setPull(0);
+    };
+
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("touchend", onTouchEnd, { passive: true });
+    window.addEventListener("touchcancel", onTouchEnd, { passive: true });
+
+    return () => {
+      window.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onTouchEnd);
+      window.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [enabled, refreshing]);
+
+  if (!enabled) return null;
+
+  const message = refreshing ? "Refreshing..." : pull >= 72 ? "Release to refresh" : "Pull to refresh";
+
+  return (
+    <div
+      className="pointer-events-none fixed left-0 right-0 top-0 z-[100] flex justify-center"
+      style={{
+        transform: `translateY(${pull > 0 ? 0 : -80}px)`,
+        transition: pull > 0 ? "none" : "transform 180ms ease",
+      }}
+      aria-hidden
+    >
+      <div className="mt-2 rounded-full border bg-white px-4 py-1 text-xs text-gray-700 shadow-sm">{message}</div>
+    </div>
+  );
+}
