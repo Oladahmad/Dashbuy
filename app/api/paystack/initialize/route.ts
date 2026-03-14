@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 type Body = {
-  orderId: string;
+  orderId?: string;
+  orderIds?: string[];
   email: string;
 };
 
@@ -37,9 +38,13 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Partial<Body>;
     const orderId = asText(body.orderId).trim();
+    const orderIds = Array.isArray(body.orderIds)
+      ? body.orderIds.map((id) => asText(id).trim()).filter(Boolean)
+      : [];
     const email = asText(body.email).trim();
+    const requestedOrderIds = Array.from(new Set(orderId ? [orderId, ...orderIds] : orderIds));
 
-    if (!orderId || !email) {
+    if (requestedOrderIds.length === 0 || !email) {
       return NextResponse.json({ ok: false, error: "Missing orderId or email" }, { status: 400 });
     }
 
@@ -48,32 +53,39 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "PAYSTACK_SECRET_KEY missing in env" }, { status: 500 });
     }
 
-    const { data: order, error: orderErr } = await supabaseAdmin
+    const { data: orders, error: orderErr } = await supabaseAdmin
       .from("orders")
-      .select("id,total,status,paystack_reference")
-      .eq("id", orderId)
-      .maybeSingle();
+      .select("id,total,status,paystack_reference,customer_id")
+      .in("id", requestedOrderIds);
 
     if (orderErr) {
       return NextResponse.json({ ok: false, error: "Order lookup error: " + orderErr.message }, { status: 500 });
     }
 
-    if (!order) {
-      return NextResponse.json({ ok: false, error: "Order not found" }, { status: 404 });
+    if (!orders || orders.length !== requestedOrderIds.length) {
+      return NextResponse.json({ ok: false, error: "One or more orders were not found" }, { status: 404 });
     }
 
-    if (order.status !== "pending_payment") {
-      return NextResponse.json({ ok: false, error: "Order is not pending payment" }, { status: 400 });
+    if (orders.some((order) => order.status !== "pending_payment")) {
+      return NextResponse.json({ ok: false, error: "One or more orders are not pending payment" }, { status: 400 });
     }
 
-    const totalNaira = asNumber(order.total);
+    const customerIds = Array.from(new Set(orders.map((order) => asText(order.customer_id).trim()).filter(Boolean)));
+    if (customerIds.length > 1) {
+      return NextResponse.json({ ok: false, error: "Orders belong to different customers" }, { status: 400 });
+    }
+
+    const totalNaira = orders.reduce((sum, order) => sum + asNumber(order.total), 0);
     if (!totalNaira || totalNaira <= 0) {
       return NextResponse.json({ ok: false, error: "Order total is invalid" }, { status: 400 });
     }
 
     const amountKobo = nairaToKobo(totalNaira);
 
-    const reference = asText(order.paystack_reference).trim() || genRef(orderId);
+    const existingReference = orders
+      .map((order) => asText(order.paystack_reference).trim())
+      .find(Boolean);
+    const reference = existingReference || genRef(requestedOrderIds[0]);
 
     const envBase = asText(process.env.NEXT_PUBLIC_SITE_URL).trim();
     const xfProto = asText(req.headers.get("x-forwarded-proto")).trim() || "https";
@@ -91,13 +103,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const callbackUrl = `${baseUrl}/food/pay/callback?orderId=${orderId}`;
+    const callbackUrl = `${baseUrl}/food/pay/callback`;
 
-    if (!order.paystack_reference) {
+    if (orders.some((order) => asText(order.paystack_reference).trim() !== reference)) {
       const { error: saveRefErr } = await supabaseAdmin
         .from("orders")
         .update({ paystack_reference: reference })
-        .eq("id", orderId);
+        .in("id", requestedOrderIds);
 
       if (saveRefErr) {
         return NextResponse.json(
@@ -118,7 +130,11 @@ export async function POST(req: Request) {
         amount: amountKobo,
         reference,
         callback_url: callbackUrl,
-        metadata: { orderId, type: "orders" },
+        metadata: {
+          orderId: requestedOrderIds[0],
+          orderIds: requestedOrderIds,
+          type: "orders",
+        },
       }),
     });
 
@@ -131,17 +147,29 @@ export async function POST(req: Request) {
       );
     }
 
-    const { error: payErr } = await supabaseAdmin.from("payments").insert({
-      order_id: orderId,
-      provider: "paystack",
-      reference,
-      amount: totalNaira,
-      currency: "NGN",
-      status: "initialized",
-    });
+    const existingPayments = await supabaseAdmin
+      .from("payments")
+      .select("id")
+      .eq("reference", reference)
+      .limit(1);
 
-    if (payErr) {
-      return NextResponse.json({ ok: false, error: "Payment insert failed: " + payErr.message }, { status: 500 });
+    if (existingPayments.error) {
+      return NextResponse.json({ ok: false, error: "Payment lookup failed: " + existingPayments.error.message }, { status: 500 });
+    }
+
+    if ((existingPayments.data ?? []).length === 0) {
+      const { error: payErr } = await supabaseAdmin.from("payments").insert({
+        order_id: requestedOrderIds[0],
+        provider: "paystack",
+        reference,
+        amount: totalNaira,
+        currency: "NGN",
+        status: "initialized",
+      });
+
+      if (payErr) {
+        return NextResponse.json({ ok: false, error: "Payment insert failed: " + payErr.message }, { status: 500 });
+      }
     }
 
     return NextResponse.json({

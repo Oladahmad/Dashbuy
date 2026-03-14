@@ -241,12 +241,12 @@ export default function ProductCheckoutPage() {
     localStorage.removeItem(CART_KEY);
     setLoading(false);
 
-    if (createdOrderIds.length === 1) {
-      router.push(`/food/pay?orderId=${createdOrderIds[0]}`);
-      return;
-    }
+    const paymentQuery =
+      createdOrderIds.length === 1
+        ? `orderId=${encodeURIComponent(createdOrderIds[0])}`
+        : `orderIds=${encodeURIComponent(createdOrderIds.join(","))}`;
 
-    router.push("/orders");
+    router.push(`/food/pay?${paymentQuery}`);
   }
 
   if (loading) return <main className="p-6">Loading...</main>;

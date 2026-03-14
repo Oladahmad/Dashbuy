@@ -12,6 +12,18 @@ type OrderRow = {
   status: string | null;
   total: number | null;
   created_at: string;
+  paystack_reference: string | null;
+};
+
+type OrderGroup = {
+  id: string;
+  order_type: "food" | "product" | "mixed";
+  food_mode: "plate" | "combo" | null;
+  status: string | null;
+  total: number;
+  created_at: string;
+  paystack_reference: string | null;
+  orders: OrderRow[];
 };
 
 function naira(n: number) {
@@ -26,13 +38,15 @@ function fmtDate(iso: string) {
   }
 }
 
-function labelForOrder(o: OrderRow) {
+function labelForOrder(o: Pick<OrderGroup, "order_type" | "food_mode">) {
+  if (o.order_type === "mixed") return "Combined Order";
   if (o.order_type === "product") return "Product Order";
   if ((o.food_mode ?? "plate") === "combo") return "Food Combo Order";
   return "Food Plate Order";
 }
 
-function typeForOrder(o: OrderRow) {
+function typeForOrder(o: Pick<OrderGroup, "order_type" | "food_mode">) {
+  if (o.order_type === "mixed") return "Type: Mixed purchase";
   if (o.order_type === "product") return "Type: Products";
   if ((o.food_mode ?? "plate") === "combo") return "Type: Food - Combo";
   return "Type: Food - Plate";
@@ -52,6 +66,36 @@ function friendlyStatus(status: string | null) {
   return status ?? "Unknown";
 }
 
+function groupKey(order: OrderRow) {
+  return order.paystack_reference?.trim() || order.id;
+}
+
+function groupStatus(orders: OrderRow[]) {
+  const statuses = orders.map((o) => (o.status ?? "").toLowerCase());
+  if (statuses.includes("pending_payment")) return "pending_payment";
+  if (statuses.includes("pending_vendor")) return "pending_vendor";
+  if (statuses.includes("accepted")) return "accepted";
+  if (statuses.includes("pending_pickup")) return "pending_pickup";
+  if (statuses.includes("picked_up")) return "picked_up";
+  if (statuses.every((s) => s === "delivered")) return "delivered";
+  if (statuses.includes("rejected") || statuses.includes("declined")) return "declined";
+  if (statuses.includes("cancelled")) return "cancelled";
+  if (statuses.includes("refunded")) return "refunded";
+  return orders[0]?.status ?? null;
+}
+
+function groupType(orders: OrderRow[]): Pick<OrderGroup, "order_type" | "food_mode"> {
+  const types = Array.from(new Set(orders.map((o) => o.order_type)));
+  if (types.length > 1) return { order_type: "mixed", food_mode: null };
+  const onlyType = types[0] ?? "product";
+  if (onlyType === "product") return { order_type: "product", food_mode: null };
+  const foodModes = Array.from(new Set(orders.map((o) => o.food_mode).filter(Boolean)));
+  return {
+    order_type: "food",
+    food_mode: foodModes.length === 1 ? (foodModes[0] as "plate" | "combo") : null,
+  };
+}
+
 export default function OrdersPage() {
   const router = useRouter();
 
@@ -59,15 +103,47 @@ export default function OrdersPage() {
   const [msg, setMsg] = useState("");
   const [orders, setOrders] = useState<OrderRow[]>([]);
 
+  const groupedOrders = useMemo(() => {
+    const groups = new Map<string, OrderRow[]>();
+    for (const order of orders) {
+      const key = groupKey(order);
+      const existing = groups.get(key) ?? [];
+      existing.push(order);
+      groups.set(key, existing);
+    }
+
+    return Array.from(groups.values())
+      .map((group): OrderGroup => {
+        const sorted = [...group].sort((a, b) => b.created_at.localeCompare(a.created_at));
+        const primary = sorted[0];
+        const typeInfo = groupType(sorted);
+        return {
+          id: primary.id,
+          order_type: typeInfo.order_type,
+          food_mode: typeInfo.food_mode,
+          status: groupStatus(sorted),
+          total: sorted.reduce((sum, item) => sum + Number(item.total ?? 0), 0),
+          created_at: primary.created_at,
+          paystack_reference: primary.paystack_reference,
+          orders: sorted,
+        };
+      })
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }, [orders]);
+
   const counts = useMemo(() => {
     let food = 0;
     let products = 0;
-    for (const o of orders) {
+    for (const o of groupedOrders) {
       if (o.order_type === "food") food += 1;
       if (o.order_type === "product") products += 1;
+      if (o.order_type === "mixed") {
+        food += 1;
+        products += 1;
+      }
     }
-    return { food, products, total: orders.length };
-  }, [orders]);
+    return { food, products, total: groupedOrders.length };
+  }, [groupedOrders]);
 
   useEffect(() => {
     (async () => {
@@ -84,7 +160,7 @@ export default function OrdersPage() {
 
       const { data, error } = await supabase
         .from("orders")
-        .select("id,order_type,food_mode,status,total,created_at")
+        .select("id,order_type,food_mode,status,total,created_at,paystack_reference")
         .eq("customer_id", user.id)
         .order("created_at", { ascending: false });
 
@@ -142,12 +218,16 @@ export default function OrdersPage() {
 
       {loading ? (
         <div className="mt-4 rounded-2xl border bg-white p-5 text-sm text-gray-600">Loading orders...</div>
-      ) : orders.length === 0 ? (
+      ) : groupedOrders.length === 0 ? (
         <div className="mt-4 rounded-2xl border bg-white p-5 text-sm text-gray-600">No orders yet.</div>
       ) : (
         <div className="mt-4 grid gap-3">
-          {orders.map((o) => {
+          {groupedOrders.map((o) => {
             const isPendingPayment = (o.status ?? "").toLowerCase() === "pending_payment";
+            const paymentQuery =
+              o.orders.length > 1
+                ? `/food/pay?orderIds=${encodeURIComponent(o.orders.map((row) => row.id).join(","))}`
+                : `/food/pay?orderId=${encodeURIComponent(o.id)}`;
 
             return (
               <div key={o.id} className="rounded-2xl border bg-white p-4">
@@ -166,13 +246,16 @@ export default function OrdersPage() {
                     <span>{fmtDate(o.created_at)}</span>
                   </div>
                   <p className="mt-1 text-xs text-gray-500">{typeForOrder(o)}</p>
+                  {o.orders.length > 1 ? (
+                    <p className="mt-1 text-xs text-gray-500">{o.orders.length} vendor orders in this purchase</p>
+                  ) : null}
                 </button>
 
                 {isPendingPayment ? (
                   <button
                     type="button"
                     className="mt-3 rounded-xl bg-black px-4 py-2 text-sm text-white"
-                    onClick={() => router.push(`/food/pay?orderId=${o.id}`)}
+                    onClick={() => router.push(paymentQuery)}
                   >
                     Continue payment
                   </button>

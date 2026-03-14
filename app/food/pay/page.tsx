@@ -1,18 +1,31 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 function PayPageInner() {
   const sp = useSearchParams();
   const orderId = sp.get("orderId");
+  const orderIdsParam = sp.get("orderIds") ?? "";
+  const orderIds = useMemo(
+    () =>
+      orderIdsParam
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean),
+    [orderIdsParam]
+  );
 
   const [msg, setMsg] = useState("Preparing payment...");
+  const startedRef = useRef(false);
 
   useEffect(() => {
     (async () => {
-      if (!orderId) {
+      if (startedRef.current) return;
+      startedRef.current = true;
+
+      if (!orderId && orderIds.length === 0) {
         setMsg("Missing orderId");
         return;
       }
@@ -28,7 +41,11 @@ function PayPageInner() {
       const res = await fetch("/api/paystack/initialize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, email }),
+        body: JSON.stringify({
+          orderId: orderId ?? undefined,
+          orderIds: orderIds.length > 0 ? orderIds : undefined,
+          email,
+        }),
       });
 
       const data = await res.json();
@@ -41,7 +58,7 @@ function PayPageInner() {
       // Redirect to Paystack hosted checkout
       window.location.href = data.authorization_url;
     })();
-  }, [orderId]);
+  }, [orderId, orderIds, orderIdsParam]);
 
   return (
     <main className="p-6 max-w-xl">

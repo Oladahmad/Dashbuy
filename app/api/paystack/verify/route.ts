@@ -2,6 +2,20 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { notifyOrderEvent } from "@/lib/orderNotifications";
 
+type PaidOrder = {
+  id: string;
+  status: string | null;
+  vendor_id: string;
+  customer_id: string;
+  order_type: string;
+  food_mode: string | null;
+  total: number | null;
+  total_amount: number | null;
+  delivery_address: string | null;
+  customer_phone: string | null;
+  created_at: string;
+};
+
 export async function POST(req: Request) {
   try {
     const { reference } = await req.json();
@@ -42,70 +56,48 @@ export async function POST(req: Request) {
     const ref = String(data?.data?.reference ?? reference);
 
     if (paystackStatus === "success") {
-      const orderIdFromMeta = data?.data?.metadata?.orderId
-        ? String(data.data.metadata.orderId)
-        : null;
+      const orderIdFromMeta = data?.data?.metadata?.orderId ? String(data.data.metadata.orderId) : null;
+      const orderIdsFromMeta = Array.isArray(data?.data?.metadata?.orderIds)
+        ? data.data.metadata.orderIds.map((id: unknown) => String(id)).filter(Boolean)
+        : [];
+      const fallbackOrderIds = Array.from(new Set(orderIdFromMeta ? [orderIdFromMeta, ...orderIdsFromMeta] : orderIdsFromMeta));
 
       const updatePayload = {
         status: "pending_vendor",
         paystack_reference: ref,
-        total_amount: Math.round(amountKobo / 100),
       };
 
-      let updatedOrder:
-        | {
-            id: string;
-            status: string | null;
-            vendor_id: string;
-            customer_id: string;
-            order_type: string;
-            food_mode: string | null;
-            total_amount: number | null;
-            delivery_address: string | null;
-            customer_phone: string | null;
-            created_at: string;
-          }
-        | null = null;
+      let targetOrders: PaidOrder[] = [];
 
-      const byRef = await supabaseAdmin
+      const byRefLookup = await supabaseAdmin
         .from("orders")
-        .update(updatePayload)
-        .eq("paystack_reference", ref)
         .select(
-          "id,status,vendor_id,customer_id,order_type,food_mode,total_amount,delivery_address,customer_phone,created_at"
+          "id,status,vendor_id,customer_id,order_type,food_mode,total,total_amount,delivery_address,customer_phone,created_at"
         )
-        .maybeSingle();
+        .eq("paystack_reference", ref);
 
-      if (byRef.error) {
-        return NextResponse.json(
-          { ok: false, error: "DB update error: " + byRef.error.message },
-          { status: 500 }
-        );
+      if (byRefLookup.error) {
+        return NextResponse.json({ ok: false, error: "Order lookup error: " + byRefLookup.error.message }, { status: 500 });
       }
 
-      updatedOrder = byRef.data ?? null;
+      targetOrders = (byRefLookup.data as PaidOrder[] | null) ?? [];
 
-      if (!updatedOrder && orderIdFromMeta) {
-        const byId = await supabaseAdmin
+      if (targetOrders.length === 0 && fallbackOrderIds.length > 0) {
+        const byIdLookup = await supabaseAdmin
           .from("orders")
-          .update(updatePayload)
-          .eq("id", orderIdFromMeta)
           .select(
-            "id,status,vendor_id,customer_id,order_type,food_mode,total_amount,delivery_address,customer_phone,created_at"
+            "id,status,vendor_id,customer_id,order_type,food_mode,total,total_amount,delivery_address,customer_phone,created_at"
           )
-          .maybeSingle();
+          .in("id", fallbackOrderIds);
 
-        if (byId.error) {
-          return NextResponse.json(
-            { ok: false, error: "DB update error: " + byId.error.message },
-            { status: 500 }
-          );
+        if (byIdLookup.error) {
+          return NextResponse.json({ ok: false, error: "Order lookup error: " + byIdLookup.error.message }, { status: 500 });
         }
 
-        updatedOrder = byId.data ?? null;
+        targetOrders = (byIdLookup.data as PaidOrder[] | null) ?? [];
       }
 
-      if (!updatedOrder) {
+      if (targetOrders.length === 0) {
         return NextResponse.json(
           {
             ok: false,
@@ -115,14 +107,49 @@ export async function POST(req: Request) {
           { status: 404 }
         );
       }
-      await notifyOrderEvent({
-        event: "order_paid",
-        orderId: updatedOrder.id,
-        vendorId: updatedOrder.vendor_id,
-        customerId: updatedOrder.customer_id,
-        amountNaira: updatedOrder.total_amount,
-        orderType: updatedOrder.order_type,
-      });
+
+      const pendingOrderIds = targetOrders.filter((order) => order.status === "pending_payment").map((order) => order.id);
+
+      if (pendingOrderIds.length > 0) {
+        const updateRes = await supabaseAdmin
+          .from("orders")
+          .update(updatePayload)
+          .in("id", pendingOrderIds);
+
+        if (updateRes.error) {
+          return NextResponse.json({ ok: false, error: "DB update error: " + updateRes.error.message }, { status: 500 });
+        }
+      }
+
+      const refreshed = await supabaseAdmin
+        .from("orders")
+        .select(
+          "id,status,vendor_id,customer_id,order_type,food_mode,total,total_amount,delivery_address,customer_phone,created_at"
+        )
+        .in(
+          "id",
+          targetOrders.map((order) => order.id)
+        );
+
+      if (refreshed.error) {
+        return NextResponse.json({ ok: false, error: "Order reload error: " + refreshed.error.message }, { status: 500 });
+      }
+
+      const updatedOrders = ((refreshed.data as PaidOrder[] | null) ?? []).sort((a, b) => a.created_at.localeCompare(b.created_at));
+      const justPaidOrders = updatedOrders.filter((order) => pendingOrderIds.includes(order.id));
+
+      await Promise.allSettled(
+        justPaidOrders.map((order) =>
+          notifyOrderEvent({
+            event: "order_paid",
+            orderId: order.id,
+            vendorId: order.vendor_id,
+            customerId: order.customer_id,
+            amountNaira: order.total_amount ?? order.total,
+            orderType: order.order_type,
+          })
+        )
+      );
 
       return NextResponse.json({
         ok: true,
@@ -131,7 +158,8 @@ export async function POST(req: Request) {
         currency,
         paidAt,
         reference: ref,
-        order: updatedOrder,
+        orders: updatedOrders,
+        notifiedOrderIds: justPaidOrders.map((order) => order.id),
       });
     }
 

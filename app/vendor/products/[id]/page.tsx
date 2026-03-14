@@ -62,6 +62,7 @@ export default function VendorProductDetailsPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   const [role, setRole] = useState<Role>("customer");
@@ -107,6 +108,62 @@ export default function VendorProductDetailsPage() {
 
     return true;
   }, [editing, name, price, stockQty, category]);
+
+  async function fileToDataUrl(f: File) {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read image file"));
+      reader.readAsDataURL(f);
+    });
+  }
+
+  async function onGenerateDescription() {
+    setMsg(null);
+
+    const p = toIntOrNull(price);
+    const q = toIntOrNull(stockQty);
+    if (!clean(name)) return setMsg("Enter product name first");
+    if (!category) return setMsg("Select category first");
+    if (p === null || p <= 0) return setMsg("Enter price first");
+
+    setAiLoading(true);
+    let imageDataUrl = "";
+    let imageUrl = "";
+
+    try {
+      if (file && file.size <= 2 * 1024 * 1024) {
+        imageDataUrl = await fileToDataUrl(file);
+      } else if (product?.image_path) {
+        imageUrl = supabase.storage.from("product-images").getPublicUrl(product.image_path).data.publicUrl ?? "";
+      }
+    } catch {
+      // Ignore image conversion errors and continue with text context.
+    }
+
+    const resp = await fetch("/api/ai/product-description", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: clean(name),
+        category: normalizeProductCategory(category),
+        price: p,
+        stockQty: q ?? 0,
+        imageDataUrl: imageDataUrl || undefined,
+        imageUrl: imageUrl || undefined,
+      }),
+    });
+
+    const body = (await resp.json().catch(() => null)) as { ok?: boolean; description?: string; error?: string } | null;
+    setAiLoading(false);
+
+    if (!resp.ok || !body?.ok || !body.description) {
+      setMsg(body?.error ?? "Failed to generate description");
+      return;
+    }
+
+    setDesc(body.description);
+  }
 
   useEffect(() => {
     let alive = true;
@@ -509,8 +566,19 @@ export default function VendorProductDetailsPage() {
 
                   <div>
                     <label className="text-sm text-gray-700">Description</label>
+                    <div className="mt-1 flex items-center justify-between">
+                      <p className="text-xs text-gray-500">Optional</p>
+                      <button
+                        type="button"
+                        className="rounded-lg border px-3 py-1 text-xs"
+                        onClick={onGenerateDescription}
+                        disabled={saving || aiLoading}
+                      >
+                        {aiLoading ? "Generating..." : "Generate with AI"}
+                      </button>
+                    </div>
                     <textarea
-                      className="mt-1 w-full rounded-xl border px-3 py-3"
+                      className="mt-2 w-full rounded-xl border px-3 py-3"
                       rows={3}
                       value={desc}
                       onChange={(e) => setDesc(e.target.value)}

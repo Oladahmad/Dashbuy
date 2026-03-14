@@ -22,6 +22,31 @@ type OrderRow = {
   customer_id: string;
 };
 
+type OrderSummary = {
+  id: string;
+  order_type: "food" | "product" | "mixed";
+  food_mode: "plate" | "combo" | null;
+  status: string | null;
+  delivery_address: string | null;
+  subtotal: number;
+  delivery_fee: number;
+  total: number;
+  created_at: string;
+  paystack_reference: string | null;
+  customer_id: string;
+  orderIds: string[];
+};
+
+type VendorTrackingCard = {
+  orderId: string;
+  vendorId: string;
+  vendorName: string;
+  status: string | null;
+  total: number;
+  orderType: "food" | "product";
+  foodMode: "plate" | "combo" | null;
+};
+
 type VendorProfile = {
   id: string;
   store_name: string | null;
@@ -77,6 +102,50 @@ function labelForOrder(o: OrderRow) {
   return "Food plate order";
 }
 
+function labelForSummary(o: OrderSummary) {
+  if (o.order_type === "mixed") return "Combined order";
+  if (o.order_type === "product") return "Products order";
+  if ((o.food_mode ?? "plate") === "combo") return "Food combo order";
+  return "Food plate order";
+}
+
+function groupStatus(orders: OrderRow[]) {
+  const statuses = orders.map((o) => (o.status ?? "").toLowerCase());
+  if (statuses.includes("pending_payment")) return "pending_payment";
+  if (statuses.includes("pending_vendor")) return "pending_vendor";
+  if (statuses.includes("accepted")) return "accepted";
+  if (statuses.includes("pending_pickup")) return "pending_pickup";
+  if (statuses.includes("picked_up")) return "picked_up";
+  if (statuses.every((s) => s === "delivered")) return "delivered";
+  if (statuses.includes("rejected") || statuses.includes("declined")) return "declined";
+  if (statuses.includes("cancelled")) return "cancelled";
+  if (statuses.includes("refunded")) return "refunded";
+  return orders[0]?.status ?? null;
+}
+
+function summarizeOrders(orders: OrderRow[]): OrderSummary {
+  const sorted = [...orders].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const first = sorted[0];
+  const types = Array.from(new Set(sorted.map((o) => o.order_type)));
+  const orderType = types.length > 1 ? "mixed" : first.order_type;
+  const foodModes = Array.from(new Set(sorted.map((o) => o.food_mode).filter(Boolean)));
+
+  return {
+    id: first.id,
+    order_type: orderType,
+    food_mode: orderType === "food" && foodModes.length === 1 ? (foodModes[0] as "plate" | "combo") : null,
+    status: groupStatus(sorted),
+    delivery_address: first.delivery_address,
+    subtotal: sorted.reduce((sum, row) => sum + safeNumber(row.subtotal), 0),
+    delivery_fee: sorted.reduce((sum, row) => sum + safeNumber(row.delivery_fee), 0),
+    total: sorted.reduce((sum, row) => sum + safeNumber(row.total), 0),
+    created_at: first.created_at,
+    paystack_reference: first.paystack_reference,
+    customer_id: first.customer_id,
+    orderIds: sorted.map((row) => row.id),
+  };
+}
+
 export default function OrderDetailsPage() {
   const router = useRouter();
   const params = useParams();
@@ -85,13 +154,14 @@ export default function OrderDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
 
-  const [order, setOrder] = useState<OrderRow | null>(null);
+  const [order, setOrder] = useState<OrderSummary | null>(null);
 
-  const [vendorName, setVendorName] = useState<string>("Vendor");
+  const [vendorNames, setVendorNames] = useState<Record<string, string>>({});
 
   const [productItems, setProductItems] = useState<ProductItemRow[]>([]);
   const [comboItems, setComboItems] = useState<ComboItemRow[]>([]);
   const [plateItems, setPlateItems] = useState<PlateItemRow[]>([]);
+  const [vendorTracking, setVendorTracking] = useState<VendorTrackingCard[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -99,10 +169,11 @@ export default function OrderDetailsPage() {
       setMsg("");
 
       setOrder(null);
-      setVendorName("Vendor");
+      setVendorNames({});
       setProductItems([]);
       setComboItems([]);
       setPlateItems([]);
+      setVendorTracking([]);
 
       const { data: sessionData } = await supabase.auth.getSession();
       const user = sessionData.session?.user;
@@ -126,31 +197,85 @@ export default function OrderDetailsPage() {
         return;
       }
 
-      const ord = o as OrderRow;
-      const { data: job } = await supabase
-        .from("logistics_jobs")
-        .select("status")
-        .eq("order_id", ord.id)
-        .maybeSingle<{ status: string | null }>();
+      const baseOrder = o as OrderRow;
+      let relatedOrders = [baseOrder];
 
-      const effectiveStatus = resolveTrackingStatus(ord.status, job?.status ?? null);
-      setOrder({ ...ord, status: effectiveStatus });
+      if (baseOrder.paystack_reference) {
+        const { data: siblings, error: siblingsErr } = await supabase
+          .from("orders")
+          .select(
+            "id,order_type,food_mode,status,delivery_address,subtotal,delivery_fee,total,created_at,paystack_reference,vendor_id,customer_id"
+          )
+          .eq("customer_id", user.id)
+          .eq("paystack_reference", baseOrder.paystack_reference)
+          .order("created_at", { ascending: true });
 
-      const { data: vp, error: vErr } = await supabase
-        .from("profiles")
-        .select("id,store_name,full_name")
-        .eq("id", ord.vendor_id)
-        .maybeSingle<VendorProfile>();
+        if (siblingsErr) {
+          setMsg(siblingsErr.message);
+          setLoading(false);
+          return;
+        }
 
-      if (!vErr && vp) {
-        setVendorName(vp.store_name || vp.full_name || "Vendor");
+        if (siblings && siblings.length > 0) {
+          relatedOrders = siblings as OrderRow[];
+        }
       }
 
-      if (ord.order_type === "product") {
+      const relatedOrderIds = relatedOrders.map((row) => row.id);
+      const { data: jobs } = await supabase.from("logistics_jobs").select("order_id,status").in("order_id", relatedOrderIds);
+      const jobsByOrderId = new Map(
+        ((jobs ?? []) as Array<{ order_id: string; status: string | null }>).map((job) => [job.order_id, job.status ?? null])
+      );
+
+      const resolvedOrders = relatedOrders.map((row) => ({
+        ...row,
+        status: resolveTrackingStatus(row.status, jobsByOrderId.get(row.id) ?? null),
+      }));
+      setOrder(summarizeOrders(resolvedOrders));
+
+      const vendorIds = Array.from(new Set(resolvedOrders.map((row) => row.vendor_id)));
+      const { data: profiles, error: profilesErr } = await supabase
+        .from("profiles")
+        .select("id,store_name,full_name")
+        .in("id", vendorIds);
+
+      if (!profilesErr && profiles) {
+        const nextNames: Record<string, string> = {};
+        for (const profile of profiles as VendorProfile[]) {
+          nextNames[profile.id] = profile.store_name || profile.full_name || "Vendor";
+        }
+        setVendorNames(nextNames);
+        setVendorTracking(
+          resolvedOrders.map((row) => ({
+            orderId: row.id,
+            vendorId: row.vendor_id,
+            vendorName: nextNames[row.vendor_id] || "Vendor",
+            status: row.status,
+            total: safeNumber(row.total),
+            orderType: row.order_type,
+            foodMode: row.food_mode,
+          }))
+        );
+      } else {
+        setVendorTracking(
+          resolvedOrders.map((row) => ({
+            orderId: row.id,
+            vendorId: row.vendor_id,
+            vendorName: "Vendor",
+            status: row.status,
+            total: safeNumber(row.total),
+            orderType: row.order_type,
+            foodMode: row.food_mode,
+          }))
+        );
+      }
+
+      const productOrderIds = resolvedOrders.filter((row) => row.order_type === "product").map((row) => row.id);
+      if (productOrderIds.length > 0) {
         const { data: it, error: itErr } = await supabase
           .from("order_items")
-          .select("id,qty,unit_price,line_total,products:product_id(id,name)")
-          .eq("order_id", ord.id);
+          .select("id,qty,unit_price,line_total,order_id,products:product_id(id,name)")
+          .in("order_id", productOrderIds);
 
         if (itErr) {
           setMsg(itErr.message);
@@ -159,14 +284,18 @@ export default function OrderDetailsPage() {
         }
 
         setProductItems((it as unknown as ProductItemRow[]) ?? []);
+      }
+
+      const foodOrderIds = resolvedOrders.filter((row) => row.order_type === "food").map((row) => row.id);
+      if (foodOrderIds.length === 0) {
         setLoading(false);
         return;
       }
 
       const { data: comboRows, error: comboErr } = await supabase
         .from("combo_order_items")
-        .select("id,qty,unit_price,line_total,food_items:combo_food_id(id,name)")
-        .eq("order_id", ord.id);
+        .select("id,qty,unit_price,line_total,order_id,food_items:combo_food_id(id,name)")
+        .in("order_id", foodOrderIds);
 
       if (comboErr) {
         setMsg(comboErr.message);
@@ -188,7 +317,7 @@ export default function OrderDetailsPage() {
       const { data: plates, error: pErr } = await supabase
         .from("order_plates")
         .select("id,order_id")
-        .eq("order_id", ord.id);
+        .in("order_id", foodOrderIds);
 
       if (pErr) {
         setMsg(pErr.message);
@@ -214,9 +343,9 @@ export default function OrderDetailsPage() {
         }
 
         const plateList = (pit as unknown as PlateItemRow[]) ?? [];
-        setPlateItems((ord.food_mode ?? "plate") === "combo" ? plateList : [...plateList, ...comboAsPlate]);
+        setPlateItems([...plateList, ...comboAsPlate]);
       } else {
-        setPlateItems((ord.food_mode ?? "plate") === "combo" ? [] : comboAsPlate);
+        setPlateItems(comboAsPlate);
       }
       setLoading(false);
     })();
@@ -228,17 +357,46 @@ export default function OrderDetailsPage() {
     let alive = true;
 
     async function refreshTracking() {
-      const { data: o } = await supabase.from("orders").select("status").eq("id", id).maybeSingle<{ status: string | null }>();
-      const { data: j } = await supabase
-        .from("logistics_jobs")
-        .select("status")
-        .eq("order_id", id)
-        .maybeSingle<{ status: string | null }>();
+      if (!order?.orderIds.length) return;
+
+      const { data: o } = await supabase.from("orders").select("id,status").in("id", order.orderIds);
+      const { data: j } = await supabase.from("logistics_jobs").select("order_id,status").in("order_id", order.orderIds);
 
       if (!alive) return;
 
-      const nextStatus = resolveTrackingStatus(o?.status ?? null, j?.status ?? null);
-      setOrder((prev) => (prev ? { ...prev, status: nextStatus } : prev));
+      const logisticsByOrderId = new Map(
+        ((j ?? []) as Array<{ order_id: string; status: string | null }>).map((row) => [row.order_id, row.status ?? null])
+      );
+      const refreshedOrders = ((o ?? []) as Array<{ id: string; status: string | null }>).map((row) => ({
+        id: row.id,
+        status: resolveTrackingStatus(row.status, logisticsByOrderId.get(row.id) ?? null),
+      }));
+      const statusById = new Map(refreshedOrders.map((row) => [row.id, row.status]));
+
+      setOrder((prev) => {
+        if (!prev) return prev;
+        const fakeRows = prev.orderIds.map((orderId) => ({
+          id: orderId,
+          order_type: prev.order_type === "mixed" ? "product" : prev.order_type,
+          food_mode: prev.food_mode,
+          status: statusById.get(orderId) ?? prev.status,
+          delivery_address: prev.delivery_address,
+          subtotal: 0,
+          delivery_fee: 0,
+          total: 0,
+          created_at: prev.created_at,
+          paystack_reference: prev.paystack_reference,
+          vendor_id: "",
+          customer_id: prev.customer_id,
+        }));
+        return { ...prev, status: groupStatus(fakeRows) };
+      });
+      setVendorTracking((prev) =>
+        prev.map((item) => ({
+          ...item,
+          status: statusById.get(item.orderId) ?? item.status,
+        }))
+      );
     }
 
     const channel = supabase
@@ -258,16 +416,25 @@ export default function OrderDetailsPage() {
       clearInterval(timer);
       supabase.removeChannel(channel);
     };
-  }, [id]);
+  }, [id, order?.customer_id, order?.created_at, order?.delivery_address, order?.food_mode, order?.orderIds, order?.order_type, order?.paystack_reference, order?.status]);
 
   const grouped = useMemo(() => {
     if (!order) return [];
-    const vendor = vendorName || "Vendor";
+    const vendorEntries = Object.entries(vendorNames);
+    const vendor = vendorEntries.length === 1 ? vendorEntries[0][1] : "Vendors";
 
     if (order.order_type === "product") return [[vendor, productItems]] as [string, ProductItemRow[]][];
-    if ((order.food_mode ?? "plate") === "combo") return [[vendor, comboItems]] as [string, ComboItemRow[]][];
+    if (order.order_type === "food" && (order.food_mode ?? "plate") === "combo")
+      return [[vendor, comboItems]] as [string, ComboItemRow[]][];
     return [[vendor, plateItems]] as [string, PlateItemRow[]][];
-  }, [order, vendorName, productItems, comboItems, plateItems]);
+  }, [order, vendorNames, productItems, comboItems, plateItems]);
+
+  const paymentQuery = useMemo(() => {
+    if (!order) return "";
+    return order.orderIds.length > 1
+      ? `/food/pay?orderIds=${encodeURIComponent(order.orderIds.join(","))}`
+      : `/food/pay?orderId=${encodeURIComponent(order.id)}`;
+  }, [order]);
 
   return (
     <AppShell title="Order details">
@@ -287,7 +454,7 @@ export default function OrderDetailsPage() {
         <>
           <div className="mt-4 rounded-2xl border bg-white p-5">
             <div className="flex items-center justify-between">
-              <p className="text-lg font-semibold">{labelForOrder(order)}</p>
+              <p className="text-lg font-semibold">{labelForSummary(order)}</p>
               <span className="rounded-full border px-3 py-1 text-sm">{order.status ?? "unknown"}</span>
             </div>
 
@@ -298,10 +465,41 @@ export default function OrderDetailsPage() {
             </p>
 
             {order.paystack_reference ? <p className="mt-2 text-xs text-gray-500">Ref: {order.paystack_reference}</p> : null}
+            {order.orderIds.length > 1 ? (
+              <p className="mt-2 text-xs text-gray-500">{order.orderIds.length} vendor orders combined in this purchase</p>
+            ) : null}
+            {(order.status ?? "").toLowerCase() === "pending_payment" ? (
+              <button
+                type="button"
+                className="mt-4 rounded-xl bg-black px-4 py-2 text-sm text-white"
+                onClick={() => router.push(paymentQuery)}
+              >
+                Continue payment
+              </button>
+            ) : null}
           </div>
 
-          <div className="mt-4">
-            <OrderTimeline status={order.status} />
+          <div className="mt-4 rounded-2xl border bg-white p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold">Vendor tracking</p>
+                <p className="mt-1 text-sm text-gray-600">Each vendor order is tracked separately in real time.</p>
+              </div>
+              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-xs text-gray-600">
+                {vendorTracking.length} live monitor{vendorTracking.length === 1 ? "" : "s"}
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-3">
+              {vendorTracking.map((item) => (
+                <OrderTimeline
+                  key={item.orderId}
+                  status={item.status}
+                  title={item.vendorName}
+                  subtitle={`${item.orderType === "product" ? "Product order" : "Food order"} · ${naira(item.total)} · Ref ${item.orderId.slice(0, 8)}`}
+                />
+              ))}
+            </div>
           </div>
 
           <div className="mt-4 rounded-2xl border bg-white p-5">

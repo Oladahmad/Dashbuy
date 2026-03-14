@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 
 function PayCallbackPageInner() {
@@ -8,9 +8,13 @@ function PayCallbackPageInner() {
   const router = useRouter();
 
   const [msg, setMsg] = useState("Verifying payment...");
+  const startedRef = useRef(false);
 
   useEffect(() => {
     (async () => {
+      if (startedRef.current) return;
+      startedRef.current = true;
+
       const reference = sp.get("reference");
 
       if (!reference) {

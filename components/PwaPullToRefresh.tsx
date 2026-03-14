@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 function isStandalonePwa() {
   if (typeof window === "undefined") return false;
+  if (process.env.NODE_ENV !== "production") return false;
   const iosStandalone = (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
   const displayModeStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches === true;
   return iosStandalone || displayModeStandalone;

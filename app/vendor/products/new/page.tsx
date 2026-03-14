@@ -19,6 +19,7 @@ export default function VendorProductsNewPage() {
 
   const [role, setRole] = useState<Role>("customer");
   const [loading, setLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const [name, setName] = useState("");
@@ -54,6 +55,68 @@ export default function VendorProductsNewPage() {
   }, []);
 
   const isAllowed = role === "vendor_products" || role === "admin";
+
+  async function fileToDataUrl(f: File) {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read image file"));
+      reader.readAsDataURL(f);
+    });
+  }
+
+  async function onGenerateDescription() {
+    setErr(null);
+
+    const p = toIntOrNull(price);
+    const q = toIntOrNull(stockQty);
+
+    if (!name.trim()) {
+      setErr("Enter product name first");
+      return;
+    }
+    if (!category) {
+      setErr("Select category first");
+      return;
+    }
+    if (p === null || p <= 0) {
+      setErr("Enter price first");
+      return;
+    }
+
+    setAiLoading(true);
+    let imageDataUrl = "";
+
+    try {
+      if (file && file.size <= 2 * 1024 * 1024) {
+        imageDataUrl = await fileToDataUrl(file);
+      }
+    } catch {
+      // Ignore image read failure and generate from text only.
+    }
+
+    const resp = await fetch("/api/ai/product-description", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: name.trim(),
+        category: normalizeProductCategory(category),
+        price: p,
+        stockQty: q ?? 0,
+        imageDataUrl: imageDataUrl || undefined,
+      }),
+    });
+
+    const body = (await resp.json().catch(() => null)) as { ok?: boolean; description?: string; error?: string } | null;
+    setAiLoading(false);
+
+    if (!resp.ok || !body?.ok || !body.description) {
+      setErr(body?.error ?? "Failed to generate description");
+      return;
+    }
+
+    setDesc(body.description);
+  }
 
   async function onCreate() {
     setErr(null);
@@ -206,8 +269,19 @@ export default function VendorProductsNewPage() {
 
         <div>
           <label className="text-sm text-gray-700">Description</label>
+          <div className="mt-1 flex items-center justify-between">
+            <p className="text-xs text-gray-500">Optional</p>
+            <button
+              type="button"
+              className="rounded-lg border px-3 py-1 text-xs"
+              onClick={onGenerateDescription}
+              disabled={!isAllowed || aiLoading || loading}
+            >
+              {aiLoading ? "Generating..." : "Generate with AI"}
+            </button>
+          </div>
           <textarea
-            className="mt-1 w-full rounded-xl border px-3 py-3"
+            className="mt-2 w-full rounded-xl border px-3 py-3"
             placeholder="Short description"
             value={desc}
             onChange={(e) => setDesc(e.target.value)}

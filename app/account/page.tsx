@@ -12,6 +12,17 @@ type OrderRow = {
   status: string | null;
   total: number | null;
   created_at: string;
+  paystack_reference: string | null;
+};
+
+type OrderGroup = {
+  id: string;
+  order_type: "food" | "product" | "mixed";
+  food_mode: "plate" | "combo" | null;
+  status: string | null;
+  total: number;
+  created_at: string;
+  orders: OrderRow[];
 };
 
 type ProfileRow = {
@@ -41,13 +52,15 @@ function isBlank(s: string | null | undefined) {
   return !s || !clean(s);
 }
 
-function labelForOrder(o: OrderRow) {
+function labelForOrder(o: Pick<OrderGroup, "order_type" | "food_mode">) {
+  if (o.order_type === "mixed") return "Combined Order";
   if (o.order_type === "product") return "Product Order";
   if ((o.food_mode ?? "plate") === "combo") return "Food Combo Order";
   return "Food Plate Order";
 }
 
-function typeForOrder(o: OrderRow) {
+function typeForOrder(o: Pick<OrderGroup, "order_type" | "food_mode">) {
+  if (o.order_type === "mixed") return "Type: Mixed purchase";
   if (o.order_type === "product") return "Type: Products";
   if ((o.food_mode ?? "plate") === "combo") return "Type: Food - Combo";
   return "Type: Food - Plate";
@@ -65,6 +78,50 @@ function friendlyStatus(status: string | null) {
   if (s === "cancelled") return "Cancelled";
   if (s === "refunded") return "Refunded";
   return status ?? "Unknown";
+}
+
+function groupStatus(orders: OrderRow[]) {
+  const statuses = orders.map((o) => (o.status ?? "").toLowerCase());
+  if (statuses.includes("pending_payment")) return "pending_payment";
+  if (statuses.includes("pending_vendor")) return "pending_vendor";
+  if (statuses.includes("accepted")) return "accepted";
+  if (statuses.includes("pending_pickup")) return "pending_pickup";
+  if (statuses.includes("picked_up")) return "picked_up";
+  if (statuses.every((s) => s === "delivered")) return "delivered";
+  if (statuses.includes("rejected") || statuses.includes("declined")) return "declined";
+  if (statuses.includes("cancelled")) return "cancelled";
+  if (statuses.includes("refunded")) return "refunded";
+  return orders[0]?.status ?? null;
+}
+
+function groupOrders(rows: OrderRow[]) {
+  const groups = new Map<string, OrderRow[]>();
+  for (const row of rows) {
+    const key = row.paystack_reference?.trim() || row.id;
+    const existing = groups.get(key) ?? [];
+    existing.push(row);
+    groups.set(key, existing);
+  }
+
+  return Array.from(groups.values())
+    .map((group): OrderGroup => {
+      const sorted = [...group].sort((a, b) => b.created_at.localeCompare(a.created_at));
+      const primary = sorted[0];
+      const types = Array.from(new Set(sorted.map((o) => o.order_type)));
+      const orderType = types.length > 1 ? "mixed" : primary.order_type;
+      const foodModes = Array.from(new Set(sorted.map((o) => o.food_mode).filter(Boolean)));
+
+      return {
+        id: primary.id,
+        order_type: orderType,
+        food_mode: orderType === "food" && foodModes.length === 1 ? (foodModes[0] as "plate" | "combo") : null,
+        status: groupStatus(sorted),
+        total: sorted.reduce((sum, item) => sum + Number(item.total ?? 0), 0),
+        created_at: primary.created_at,
+        orders: sorted,
+      };
+    })
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
 export default function AccountPage() {
@@ -86,7 +143,7 @@ export default function AccountPage() {
   const [saving, setSaving] = useState(false);
 
   const [ordersLoading, setOrdersLoading] = useState(false);
-  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [orders, setOrders] = useState<OrderGroup[]>([]);
 
   const requiredMissing = useMemo(() => {
     if (!profile) return true;
@@ -132,10 +189,10 @@ export default function AccountPage() {
 
       const { data: ord, error: ordErr } = await supabase
         .from("orders")
-        .select("id,order_type,food_mode,status,total,created_at")
+        .select("id,order_type,food_mode,status,total,created_at,paystack_reference")
         .eq("customer_id", user.id)
         .order("created_at", { ascending: false })
-        .limit(3);
+        .limit(12);
 
       if (ordErr) {
         setOrders([]);
@@ -158,7 +215,7 @@ export default function AccountPage() {
             if (deliveredOrderIds.has(row.id)) row.status = "delivered";
           }
         }
-        setOrders(rows);
+        setOrders(groupOrders(rows).slice(0, 3));
       }
 
       setOrdersLoading(false);
@@ -379,13 +436,16 @@ export default function AccountPage() {
                       <p className="font-bold">{naira(o.total ?? 0)}</p>
                     </div>
 
-                    <div className="mt-1 flex items-center justify-between text-sm text-gray-600">
-                      <span>{friendlyStatus(o.status)}</span>
-                      <span>{fmtDate(o.created_at)}</span>
-                    </div>
-                    <p className="mt-1 text-xs text-gray-500">{typeForOrder(o)}</p>
-                  </button>
-                ))}
+                     <div className="mt-1 flex items-center justify-between text-sm text-gray-600">
+                       <span>{friendlyStatus(o.status)}</span>
+                       <span>{fmtDate(o.created_at)}</span>
+                     </div>
+                     <p className="mt-1 text-xs text-gray-500">{typeForOrder(o)}</p>
+                     {o.orders.length > 1 ? (
+                       <p className="mt-1 text-xs text-gray-500">{o.orders.length} vendor orders in this purchase</p>
+                     ) : null}
+                   </button>
+                 ))}
               </div>
             )}
           </div>
