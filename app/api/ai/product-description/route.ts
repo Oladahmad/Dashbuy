@@ -26,24 +26,29 @@ function isLikelyDataImage(v: string) {
   return /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(v);
 }
 
+function parseDataImage(dataUrl: string) {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return null;
+  return { mimeType: match[1], data: match[2] };
+}
+
 function extractText(json: unknown): string {
   if (!json || typeof json !== "object") return "";
   const obj = json as Record<string, unknown>;
 
-  const outputText = obj.output_text;
-  if (typeof outputText === "string" && outputText.trim()) return outputText.trim();
+  const candidates = obj.candidates;
+  if (!Array.isArray(candidates)) return "";
 
-  const output = obj.output;
-  if (!Array.isArray(output)) return "";
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const content = (candidate as Record<string, unknown>).content;
+    if (!content || typeof content !== "object") continue;
+    const parts = (content as Record<string, unknown>).parts;
+    if (!Array.isArray(parts)) continue;
 
-  for (const item of output) {
-    if (!item || typeof item !== "object") continue;
-    const content = (item as Record<string, unknown>).content;
-    if (!Array.isArray(content)) continue;
-
-    for (const c of content) {
-      if (!c || typeof c !== "object") continue;
-      const text = (c as Record<string, unknown>).text;
+    for (const part of parts) {
+      if (!part || typeof part !== "object") continue;
+      const text = (part as Record<string, unknown>).text;
       if (typeof text === "string" && text.trim()) return text.trim();
     }
   }
@@ -52,10 +57,14 @@ function extractText(json: unknown): string {
 }
 
 export async function POST(req: Request) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    "";
   if (!apiKey) {
     return NextResponse.json(
-      { ok: false, error: "Missing OPENAI_API_KEY on server." },
+      { ok: false, error: "Missing GEMINI_API_KEY on server." },
       { status: 500 }
     );
   }
@@ -85,43 +94,50 @@ export async function POST(req: Request) {
     `Stock quantity: ${stockQty !== null ? stockQty : "Not provided"}`,
   ].join("\n");
 
-  const content: Array<Record<string, unknown>> = [
-    {
-      type: "input_text",
-      text: [
-        "Write a clear ecommerce product description for Nigerian buyers.",
-        "Rules:",
-        "- 2 short paragraphs.",
-        "- Plain, simple, trustworthy language.",
-        "- Mention key use/benefit and who it is for.",
-        "- No fake claims, no emojis, no markdown.",
-        "",
-        details,
-      ].join("\n"),
-    },
-  ];
+  const prompt = [
+    "Write a clear ecommerce product description for Nigerian buyers.",
+    "Rules:",
+    "- 2 short paragraphs.",
+    "- Plain, simple, trustworthy language.",
+    "- Mention key use, benefit and who it is for.",
+    "- No fake claims, no emojis, no markdown.",
+    "- Keep it natural and seller-friendly.",
+    "",
+    details,
+    imageUrl ? `Image URL reference: ${imageUrl}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
+  const parts: Array<Record<string, unknown>> = [{ text: prompt }];
   if (imageDataUrl && isLikelyDataImage(imageDataUrl)) {
-    content.push({ type: "input_image", image_url: imageDataUrl });
-  } else if (imageUrl) {
-    content.push({ type: "input_image", image_url: imageUrl });
+    const parsed = parseDataImage(imageDataUrl);
+    if (parsed) {
+      parts.push({
+        inline_data: {
+          mime_type: parsed.mimeType,
+          data: parsed.data,
+        },
+      });
+    }
   }
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "gpt-4.1-mini",
-      max_output_tokens: 220,
-      input: [
+      contents: [
         {
           role: "user",
-          content,
+          parts,
         },
       ],
+      generationConfig: {
+        maxOutputTokens: 220,
+        temperature: 0.7,
+      },
     }),
   });
 

@@ -79,7 +79,7 @@ export default function PwaPullToRefresh() {
 
   if (!enabled) return null;
 
-  const message = refreshing ? "Refreshing..." : pull >= 72 ? "Release to refresh" : "Pull to refresh";
+  const rotation = refreshing ? 720 : Math.min(180, pull * 2.4);
 
   return (
     <div
@@ -90,7 +90,21 @@ export default function PwaPullToRefresh() {
       }}
       aria-hidden
     >
-      <div className="mt-2 rounded-full border bg-white px-4 py-1 text-xs text-gray-700 shadow-sm">{message}</div>
+      <div className="mt-2 flex h-10 w-10 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm">
+        <svg
+          viewBox="0 0 24 24"
+          className={refreshing ? "animate-spin" : ""}
+          style={{ width: 18, height: 18, transform: refreshing ? undefined : `rotate(${rotation}deg)` }}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+          <path d="M21 3v6h-6" />
+        </svg>
+      </div>
     </div>
   );
 }
