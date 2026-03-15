@@ -248,14 +248,11 @@ export default function FoodHubPage() {
       {detailsOpen && selectedCombo ? (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-3" onClick={() => { setDetailsOpen(false); setSelectedCombo(null); }} role="dialog" aria-modal="true">
           <div className="w-full max-w-lg rounded-2xl bg-white overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b">
+            <div className="p-4 border-b">
               <div className="min-w-0">
                 <p className="text-xs text-gray-600">Combo details</p>
                 <p className="text-base font-semibold truncate">{selectedCombo.name}</p>
               </div>
-              <button type="button" className="rounded-xl border px-3 py-2 text-sm" onClick={() => { setDetailsOpen(false); setSelectedCombo(null); }}>
-                Close
-              </button>
             </div>
 
             <div className="aspect-[4/3] bg-gray-100">
@@ -271,13 +268,20 @@ export default function FoodHubPage() {
                 <p className="text-lg font-bold">{naira(Number(selectedCombo.price ?? 0))}</p>
               </div>
               {selectedCombo.short_description ? <p className="text-sm text-gray-700">{selectedCombo.short_description}</p> : <p className="text-sm text-gray-500">No description yet.</p>}
-              <div className="pt-2 grid gap-2">
-                <button type="button" className="w-full rounded-xl bg-black px-4 py-3 text-white text-sm" onClick={() => addComboToCart(selectedCombo)}>
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  className="min-w-20 rounded-xl border px-4 py-3 text-sm"
+                  onClick={() => {
+                    setDetailsOpen(false);
+                    setSelectedCombo(null);
+                  }}
+                >
+                  Back
+                </button>
+                <button type="button" className="flex-1 rounded-xl bg-black px-4 py-3 text-white text-sm" onClick={() => addComboToCart(selectedCombo)}>
                   Add to cart
                 </button>
-                <a className="w-full rounded-xl border px-4 py-3 text-center text-sm" href="/food/cart">
-                  Go to cart
-                </a>
               </div>
             </div>
           </div>

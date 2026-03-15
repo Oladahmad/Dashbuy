@@ -371,14 +371,9 @@ export default function ProductsPage() {
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
           <div className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-white p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-lg font-semibold">{activeProduct.name}</p>
-                <p className="text-sm text-gray-600">{naira(activeProduct.price)}</p>
-              </div>
-              <button className="text-sm text-gray-600 underline" onClick={() => setDrawerOpen(false)} type="button">
-                Close
-              </button>
+            <div>
+              <p className="text-lg font-semibold">{activeProduct.name}</p>
+              <p className="text-sm text-gray-600">{naira(activeProduct.price)}</p>
             </div>
 
             <div className="mt-4 rounded-2xl border p-3">
@@ -430,13 +425,22 @@ export default function ProductsPage() {
               </div>
             </div>
 
-            <button
-              className="mt-4 w-full rounded-xl bg-black px-4 py-3 text-white"
-              onClick={addToCart}
-              type="button"
-            >
-              Add to cart • {naira(activeProduct.price * qty)}
-            </button>
+            <div className="mt-4 flex gap-2">
+              <button
+                className="min-w-20 rounded-xl border px-4 py-3 text-sm"
+                onClick={() => setDrawerOpen(false)}
+                type="button"
+              >
+                Back
+              </button>
+              <button
+                className="flex-1 rounded-xl bg-black px-4 py-3 text-white"
+                onClick={addToCart}
+                type="button"
+              >
+                Add to cart • {naira(activeProduct.price * qty)}
+              </button>
+            </div>
 
           </div>
         </div>

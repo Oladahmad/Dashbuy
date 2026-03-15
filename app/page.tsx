@@ -69,6 +69,32 @@ function naira(n: number) {
   return `\u20A6${Math.round(n).toLocaleString()}`;
 }
 
+function pickTrendingProducts(rows: ProductRow[]) {
+  const sorted = [...rows].sort((a, b) => {
+    const aTime = new Date(a.created_at).getTime();
+    const bTime = new Date(b.created_at).getTime();
+    return bTime - aTime;
+  });
+
+  const perVendorCounts = new Map<string, number>();
+  const picked: ProductRow[] = [];
+
+  for (const row of sorted) {
+    const vendorId = String(row.vendor_id || "").trim();
+    if (!vendorId) continue;
+
+    const currentCount = perVendorCounts.get(vendorId) ?? 0;
+    if (currentCount >= 2) continue;
+
+    picked.push(row);
+    perVendorCounts.set(vendorId, currentCount + 1);
+
+    if (picked.length >= 10) break;
+  }
+
+  return picked;
+}
+
 export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -151,7 +177,7 @@ export default function HomePage() {
 
         if (res.ok && body.ok) {
           const rows = Array.isArray(body.products) ? body.products : [];
-          setProducts(rows.slice(0, 8));
+          setProducts(pickTrendingProducts(rows));
           setLoading(false);
           return;
         }
@@ -189,7 +215,7 @@ export default function HomePage() {
               : null,
           } satisfies ProductRow;
         });
-        setProducts(rows);
+        setProducts(pickTrendingProducts(rows));
       }
       setLoading(false);
     })();
@@ -259,7 +285,7 @@ export default function HomePage() {
 
       <div className="mt-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold">Trending on Dashbuy</h2>
+          <h2 className="text-base font-semibold">Trending Products on Dashbuy</h2>
           <Link href="/products" className="text-sm text-orange-600 underline">
             See all
           </Link>
@@ -313,14 +339,9 @@ export default function HomePage() {
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
           <div className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-white p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-lg font-semibold">{activeProduct.name}</p>
-                <p className="text-sm text-gray-600">{naira(activeProduct.price)}</p>
-              </div>
-              <button className="text-sm text-gray-600 underline" onClick={() => setDrawerOpen(false)} type="button">
-                Close
-              </button>
+            <div>
+              <p className="text-lg font-semibold">{activeProduct.name}</p>
+              <p className="text-sm text-gray-600">{naira(activeProduct.price)}</p>
             </div>
 
             <div className="mt-4 rounded-2xl border p-3">
@@ -368,9 +389,18 @@ export default function HomePage() {
               </div>
             </div>
 
-            <button className="mt-4 w-full rounded-xl bg-black px-4 py-3 text-white" onClick={addToCart} type="button">
-              Add to cart • {naira(activeProduct.price * qty)}
-            </button>
+            <div className="mt-4 flex gap-2">
+              <button
+                className="min-w-20 rounded-xl border px-4 py-3 text-sm"
+                onClick={() => setDrawerOpen(false)}
+                type="button"
+              >
+                Back
+              </button>
+              <button className="flex-1 rounded-xl bg-black px-4 py-3 text-white" onClick={addToCart} type="button">
+                Add to cart • {naira(activeProduct.price * qty)}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

@@ -35,36 +35,25 @@ function parseDataImage(dataUrl: string) {
 function extractText(json: unknown): string {
   if (!json || typeof json !== "object") return "";
   const obj = json as Record<string, unknown>;
+  const choices = obj.choices;
+  if (!Array.isArray(choices)) return "";
 
-  const candidates = obj.candidates;
-  if (!Array.isArray(candidates)) return "";
-
-  for (const candidate of candidates) {
-    if (!candidate || typeof candidate !== "object") continue;
-    const content = (candidate as Record<string, unknown>).content;
-    if (!content || typeof content !== "object") continue;
-    const parts = (content as Record<string, unknown>).parts;
-    if (!Array.isArray(parts)) continue;
-
-    for (const part of parts) {
-      if (!part || typeof part !== "object") continue;
-      const text = (part as Record<string, unknown>).text;
-      if (typeof text === "string" && text.trim()) return text.trim();
-    }
+  for (const choice of choices) {
+    if (!choice || typeof choice !== "object") continue;
+    const message = (choice as Record<string, unknown>).message;
+    if (!message || typeof message !== "object") continue;
+    const content = (message as Record<string, unknown>).content;
+    if (typeof content === "string" && content.trim()) return content.trim();
   }
 
   return "";
 }
 
 export async function POST(req: Request) {
-  const apiKey =
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    "";
+  const apiKey = process.env.GROQ_API_KEY || "";
   if (!apiKey) {
     return NextResponse.json(
-      { ok: false, error: "Missing GEMINI_API_KEY on server." },
+      { ok: false, error: "Missing GROQ_API_KEY on server." },
       { status: 500 }
     );
   }
@@ -97,47 +86,46 @@ export async function POST(req: Request) {
   const prompt = [
     "Write a clear ecommerce product description for Nigerian buyers.",
     "Rules:",
-    "- 2 short paragraphs.",
+    "- Write only 1 short paragraph, maximum 55 words.",
     "- Plain, simple, trustworthy language.",
     "- Mention key use, benefit and who it is for.",
     "- No fake claims, no emojis, no markdown.",
     "- Keep it natural and seller-friendly.",
+    "- After the paragraph, add 2 or 3 short bullet-style feature lines starting with a dash.",
+    "- Keep only key selling points. Do not over-explain.",
     "",
     details,
-    imageUrl ? `Image URL reference: ${imageUrl}` : "",
+    imageUrl ? `Image reference URL: ${imageUrl}` : "",
+    imageDataUrl && isLikelyDataImage(imageDataUrl)
+      ? "An image was provided by the seller, but only use it as loose context if details already support it."
+      : "",
   ]
     .filter(Boolean)
     .join("\n");
+  const parsedImage = imageDataUrl && isLikelyDataImage(imageDataUrl) ? parseDataImage(imageDataUrl) : null;
+  const imageHint = parsedImage ? "\nSeller also uploaded a product image for visual context." : "";
 
-  const parts: Array<Record<string, unknown>> = [{ text: prompt }];
-  if (imageDataUrl && isLikelyDataImage(imageDataUrl)) {
-    const parsed = parseDataImage(imageDataUrl);
-    if (parsed) {
-      parts.push({
-        inline_data: {
-          mime_type: parsed.mimeType,
-          data: parsed.data,
-        },
-      });
-    }
-  }
-
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      contents: [
+      model: "llama-3.3-70b-versatile",
+      temperature: 0.7,
+      max_tokens: 260,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You write short, trustworthy ecommerce product descriptions for Nigerian marketplaces. Keep them concise, useful, and conversion-focused without exaggeration.",
+        },
         {
           role: "user",
-          parts,
+          content: `${prompt}${imageHint}`,
         },
       ],
-      generationConfig: {
-        maxOutputTokens: 220,
-        temperature: 0.7,
-      },
     }),
   });
 
