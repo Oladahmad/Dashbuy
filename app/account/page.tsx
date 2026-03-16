@@ -288,13 +288,7 @@ export default function AccountPage() {
 
   async function resetPassword() {
     setMsg("");
-    if (!userEmail) return setMsg("No email found for this account.");
-
-    const redirectTo = `${window.location.origin}/auth/reset-password`;
-    const { error } = await supabase.auth.resetPasswordForEmail(userEmail, { redirectTo });
-
-    if (error) return setMsg(error.message);
-    setMsg("Password reset link sent Check your email.");
+    router.push("/auth/reset-password");
   }
 
   async function logout() {

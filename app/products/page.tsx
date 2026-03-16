@@ -148,12 +148,6 @@ export default function ProductsPage() {
     const { data: u } = await supabase.auth.getUser();
     const user = u.user;
 
-    if (!user) {
-      setMsg("Please login first at /auth");
-      setDrawerOpen(false);
-      return;
-    }
-
     const vendorId = String(activeProduct.vendor_id ?? "").trim();
     if (!vendorId) {
       setMsg("Vendor missing for this product");
@@ -161,7 +155,7 @@ export default function ProductsPage() {
       return;
     }
 
-    if (vendorId === user.id) {
+    if (user && vendorId === user.id) {
       setMsg("You cannot add your own product to cart");
       setDrawerOpen(false);
       return;

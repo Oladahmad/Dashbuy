@@ -364,28 +364,7 @@ export default function VendorAccountPage() {
   async function onResetPassword() {
     setErr(null);
     setOk(null);
-
-    const { data: u, error: uerr } = await supabase.auth.getUser();
-    if (uerr) {
-      setErr(uerr.message);
-      return;
-    }
-    const user = u.user;
-    if (!user?.email) {
-      setErr("No email found on this account");
-      return;
-    }
-
-    const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
-      redirectTo: `${window.location.origin}/auth/reset-password`,
-    });
-
-    if (error) {
-      setErr(error.message);
-      return;
-    }
-
-    setOk("Password reset link sent to your email");
+    router.push("/auth/reset-password");
   }
 
   async function onLogout() {

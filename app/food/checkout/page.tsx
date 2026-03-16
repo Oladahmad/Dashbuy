@@ -120,8 +120,7 @@ export default function FoodCheckoutPage() {
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData.session?.user?.id;
       if (!userId) {
-        setMsg("Please login first at /auth");
-        setLoading(false);
+        router.replace("/auth/login?next=%2Ffood%2Fcheckout");
         return;
       }
       setLoading(false);
@@ -175,7 +174,10 @@ export default function FoodCheckoutPage() {
 
     const { data: sessionData } = await supabase.auth.getSession();
     const userId = sessionData.session?.user?.id;
-    if (!userId) return setMsg("Please login first at /auth");
+    if (!userId) {
+      router.push("/auth/login?next=%2Ffood%2Fcheckout");
+      return;
+    }
 
     const geoText = geoPoint ? `GPS: ${formatGeoPoint(geoPoint)}` : "";
     const hasAddr = addr.length > 0;

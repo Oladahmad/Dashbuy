@@ -12,6 +12,7 @@ function LoginPageInner() {
   const sp = useSearchParams();
 
   const modeParam = useMemo(() => sp.get("mode") || "user", [sp]);
+  const nextParam = useMemo(() => sp.get("next") || "", [sp]);
   const [mode, setMode] = useState<"user" | "vendor">(modeParam === "vendor" ? "vendor" : "user");
 
   const [email, setEmail] = useState("");
@@ -56,6 +57,8 @@ function LoginPageInner() {
     }
 
     const role: Role = (profile?.role ?? "customer") as Role;
+    const safeNext =
+      nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//") ? nextParam : "";
 
     // Logistics always goes to logistics dashboard
     if (role === "logistics") {
@@ -82,7 +85,7 @@ function LoginPageInner() {
       return;
     }
 
-    router.replace("/");
+    router.replace(safeNext || "/");
   }
 
   return (

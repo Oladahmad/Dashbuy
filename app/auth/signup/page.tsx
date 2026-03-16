@@ -23,10 +23,13 @@ export default function UserSignupPage() {
     setLoading(true);
     setMsg(null);
 
+    const emailRedirectTo = `${window.location.origin}/auth/callback`;
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
+        emailRedirectTo,
         data: {
           role: "customer",
           full_name: fullName,

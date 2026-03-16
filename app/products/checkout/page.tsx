@@ -89,8 +89,7 @@ export default function ProductCheckoutPage() {
       const userId = sessionData.session?.user?.id;
 
       if (!userId) {
-        setMsg("Please login first at /auth");
-        setLoading(false);
+        router.replace("/auth/login?next=%2Fproducts%2Fcheckout");
         return;
       }
 
@@ -158,7 +157,7 @@ export default function ProductCheckoutPage() {
     const userId = sessionData.session?.user?.id;
 
     if (!userId) {
-      setMsg("Please login first at /auth");
+      router.push("/auth/login?next=%2Fproducts%2Fcheckout");
       return;
     }
 

@@ -36,7 +36,7 @@ export default function ProductVendorSignupPage() {
     setMsg(null);
     setLoading(true);
 
-    const emailRedirectTo = `${window.location.origin}/auth/login?verified=1`;
+    const emailRedirectTo = `${window.location.origin}/auth/callback`;
 
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
