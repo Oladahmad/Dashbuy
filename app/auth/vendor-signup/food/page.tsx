@@ -6,6 +6,14 @@ import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import { formatAuthError, formatProfileSaveError } from "@/lib/authError";
 
+type VendorSignupFieldErrors = {
+  storeName?: string;
+  storePhone?: string;
+  storeAddress?: string;
+  email?: string;
+  password?: string;
+};
+
 export default function FoodVendorSignupPage() {
   const router = useRouter();
 
@@ -19,6 +27,7 @@ export default function FoodVendorSignupPage() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<VendorSignupFieldErrors>({});
 
   const canSubmit = useMemo(() => {
     return (
@@ -31,10 +40,32 @@ export default function FoodVendorSignupPage() {
     );
   }, [storeName, storePhone, storeAddress, email, password, loading]);
 
+  function validateForm() {
+    const errors: VendorSignupFieldErrors = {};
+    if (!storeName.trim()) errors.storeName = "Store name is required.";
+    else if (storeName.trim().length < 2) errors.storeName = "Store name must be at least 2 characters.";
+    if (!storePhone.trim()) errors.storePhone = "Phone number is required.";
+    else if (storePhone.trim().length < 6) errors.storePhone = "Enter a valid phone number.";
+    if (!storeAddress.trim()) errors.storeAddress = "Store address is required.";
+    else if (storeAddress.trim().length < 4) errors.storeAddress = "Store address is too short.";
+    if (!email.trim()) errors.email = "Email address is required.";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) errors.email = "Enter a valid email address.";
+    if (!password.trim()) errors.password = "Password is required.";
+    else if (password.trim().length < 6) errors.password = "Password must be at least 6 characters.";
+    return errors;
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const errors = validateForm();
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setMsg(null);
+      return;
+    }
     setMsg(null);
     setLoading(true);
+    setFieldErrors({});
 
     const emailRedirectTo = `${window.location.origin}/auth/callback`;
 
@@ -122,9 +153,13 @@ export default function FoodVendorSignupPage() {
               <input
                 className="mt-1 w-full rounded-xl border px-3 py-3 outline-none"
                 value={storeName}
-                onChange={(e) => setStoreName(e.target.value)}
+                onChange={(e) => {
+                  setStoreName(e.target.value);
+                  setFieldErrors((current) => ({ ...current, storeName: undefined }));
+                }}
                 placeholder="Your restaurant name"
               />
+              {fieldErrors.storeName ? <p className="mt-1 text-xs text-red-600">{fieldErrors.storeName}</p> : null}
             </div>
 
             <div>
@@ -132,9 +167,13 @@ export default function FoodVendorSignupPage() {
               <input
                 className="mt-1 w-full rounded-xl border px-3 py-3 outline-none"
                 value={storePhone}
-                onChange={(e) => setStorePhone(e.target.value)}
+                onChange={(e) => {
+                  setStorePhone(e.target.value);
+                  setFieldErrors((current) => ({ ...current, storePhone: undefined }));
+                }}
                 placeholder="080..."
               />
+              {fieldErrors.storePhone ? <p className="mt-1 text-xs text-red-600">{fieldErrors.storePhone}</p> : null}
             </div>
 
             <div>
@@ -142,9 +181,13 @@ export default function FoodVendorSignupPage() {
               <input
                 className="mt-1 w-full rounded-xl border px-3 py-3 outline-none"
                 value={storeAddress}
-                onChange={(e) => setStoreAddress(e.target.value)}
+                onChange={(e) => {
+                  setStoreAddress(e.target.value);
+                  setFieldErrors((current) => ({ ...current, storeAddress: undefined }));
+                }}
                 placeholder="Ago location"
               />
+              {fieldErrors.storeAddress ? <p className="mt-1 text-xs text-red-600">{fieldErrors.storeAddress}</p> : null}
             </div>
 
             <div>
@@ -152,10 +195,14 @@ export default function FoodVendorSignupPage() {
               <input
                 className="mt-1 w-full rounded-xl border px-3 py-3 outline-none"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setFieldErrors((current) => ({ ...current, email: undefined }));
+                }}
                 placeholder="you@gmail.com"
                 type="email"
               />
+              {fieldErrors.email ? <p className="mt-1 text-xs text-red-600">{fieldErrors.email}</p> : null}
             </div>
 
             <div>
@@ -164,7 +211,10 @@ export default function FoodVendorSignupPage() {
                 <input
                   className="w-full rounded-xl border px-3 py-3 outline-none"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setFieldErrors((current) => ({ ...current, password: undefined }));
+                  }}
                   placeholder="Create password"
                   type={showPass ? "text" : "password"}
                 />
@@ -176,6 +226,7 @@ export default function FoodVendorSignupPage() {
                   {showPass ? "Hide" : "Show"}
                 </button>
               </div>
+              {fieldErrors.password ? <p className="mt-1 text-xs text-red-600">{fieldErrors.password}</p> : null}
             </div>
 
             <button

@@ -4,8 +4,10 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
+import { formatLoginError } from "@/lib/authError";
 
 type Role = "customer" | "vendor_food" | "vendor_products" | "logistics" | "admin";
+type LoginFieldErrors = { email?: string; password?: string };
 
 function LoginPageInner() {
   const router = useRouter();
@@ -21,10 +23,30 @@ function LoginPageInner() {
 
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<LoginFieldErrors>({});
+
+  function validateLogin() {
+    const cleanEmail = email.trim();
+    const cleanPassword = password.trim();
+    const errors: LoginFieldErrors = {};
+    if (!cleanEmail) errors.email = "Enter your email address.";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) errors.email = "Enter a valid email address.";
+    if (!cleanPassword) errors.password = "Enter your password.";
+    else if (cleanPassword.length < 6) errors.password = "Password must be at least 6 characters.";
+    return errors;
+  }
 
   async function onSignIn() {
+    const errors = validateLogin();
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setMsg(null);
+      return;
+    }
+
     setLoading(true);
     setMsg(null);
+    setFieldErrors({});
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
@@ -33,7 +55,7 @@ function LoginPageInner() {
 
     if (error) {
       setLoading(false);
-      setMsg(error.message);
+      setMsg(formatLoginError(error.message));
       return;
     }
 
@@ -121,22 +143,29 @@ function LoginPageInner() {
             <input
               className="mt-1 w-full rounded-xl border px-3 py-2 outline-none"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setFieldErrors((current) => ({ ...current, email: undefined }));
+              }}
               placeholder="you@example.com"
               type="email"
             />
+            {fieldErrors.email ? <p className="mt-1 text-xs text-red-600">{fieldErrors.email}</p> : null}
           </div>
 
           <div>
             <label className="text-sm font-medium">Password</label>
             <div className="mt-1 flex items-center gap-2 rounded-xl border px-3 py-2">
-              <input
-                className="w-full outline-none"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
-                type={showPw ? "text" : "password"}
-              />
+                <input
+                  className="w-full outline-none"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setFieldErrors((current) => ({ ...current, password: undefined }));
+                  }}
+                  placeholder="Enter password"
+                  type={showPw ? "text" : "password"}
+                />
               <button
                 type="button"
                 className="text-sm text-gray-600"
@@ -145,6 +174,7 @@ function LoginPageInner() {
                 {showPw ? "Hide" : "Show"}
               </button>
             </div>
+            {fieldErrors.password ? <p className="mt-1 text-xs text-red-600">{fieldErrors.password}</p> : null}
           </div>
 
           {msg ? <p className="text-sm text-red-600">{msg}</p> : null}
