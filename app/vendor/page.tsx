@@ -258,6 +258,16 @@ export default function VendorDashboardPage() {
         </div>
       </div>
 
+      {role === "admin" ? (
+        <div className="rounded-2xl border bg-white p-4">
+          <p className="font-semibold">Admin tools</p>
+          <p className="mt-1 text-sm text-gray-600">Inspect custom restaurant request orders submitted from Food.</p>
+          <Link href="/vendor/admin/custom-food-requests" className="mt-3 block w-full rounded-xl border px-4 py-3 text-center">
+            View custom food requests
+          </Link>
+        </div>
+      ) : null}
+
       <div className="rounded-2xl border bg-white p-4">
         <div className="flex items-center justify-between">
           <p className="font-semibold">Recent orders</p>

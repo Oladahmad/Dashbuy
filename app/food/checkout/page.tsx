@@ -5,10 +5,10 @@ import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
 type PlateLine = {
-  foodItemId: string;
+  foodItemId?: string;
   name: string;
-  category: string;
-  pricingType: "fixed" | "per_scoop" | "per_unit" | "variant";
+  category?: string;
+  pricingType?: "fixed" | "per_scoop" | "per_unit" | "variant" | "custom";
   qty: number;
   unitPrice: number;
   unitLabel?: string | null;
@@ -25,6 +25,10 @@ type CartPlate = {
   plateTotal: number;
   lines: PlateLine[];
   createdAt: string;
+  customRequest?: {
+    restaurantName: string;
+    itemsSubtotal: number;
+  };
 };
 
 type ComboCartItem = {
@@ -50,6 +54,7 @@ type GeoPoint = {
 
 const FOOD_CART_KEY = "dashbuy_food_cart_v1";
 const DELIVERY_FEE = 700;
+const CUSTOM_REQUEST_VENDOR_ID = "custom_request";
 
 function formatNaira(n: number) {
   return `N${Math.round(n).toLocaleString()}`;
@@ -214,6 +219,8 @@ export default function FoodCheckoutPage() {
     const createdOrderIds: string[] = [];
 
     for (const [vendorId, group] of grouped.entries()) {
+      const isCustomVendor = vendorId === CUSTOM_REQUEST_VENDOR_ID;
+      const orderVendorId = isCustomVendor ? userId : vendorId;
       const vendorSubtotal =
         group.plates.reduce((sum, p) => sum + Number(p.plateTotal), 0) +
         group.combos.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0);
@@ -226,7 +233,7 @@ export default function FoodCheckoutPage() {
           order_type: "food",
           food_mode: foodMode,
           customer_id: userId,
-          vendor_id: vendorId,
+          vendor_id: orderVendorId,
           status: "pending_payment",
           subtotal: vendorSubtotal,
           delivery_fee: DELIVERY_FEE,
@@ -248,6 +255,59 @@ export default function FoodCheckoutPage() {
       createdOrderIds.push(order.id);
 
       for (const p of group.plates) {
+        const isCustomPlate = p.plateTemplateId === "__custom_request__";
+        if (isCustomPlate) {
+          const customSubtotal =
+            p.customRequest?.itemsSubtotal ??
+            p.lines.reduce((sum, line) => sum + Number(line.qty) * Number(line.unitPrice), 0);
+
+          const { data: customRequest, error: customErr } = await supabase
+            .from("custom_food_requests")
+            .insert({
+              order_id: order.id,
+              customer_id: userId,
+              vendor_id: orderVendorId,
+              restaurant_name: p.customRequest?.restaurantName ?? p.vendorName,
+              plate_name: p.plateName,
+              plate_fee: Number(p.plateFee),
+              items_subtotal: Number(customSubtotal),
+              total_amount: Number(p.plateTotal),
+            })
+            .select("id")
+            .single();
+
+          if (customErr || !customRequest) {
+            setLoading(false);
+            setMsg(
+              `Custom request save error: ${customErr?.message ?? "unknown"}. Run the SQL setup for custom_food_requests tables first.`
+            );
+            return;
+          }
+
+          const customItems = p.lines.map((line) => ({
+            request_id: customRequest.id,
+            food_name: line.name,
+            units: Math.max(1, Math.floor(Number(line.qty) || 1)),
+            unit_price: Math.max(0, Number(line.unitPrice) || 0),
+            line_total: Math.max(1, Math.floor(Number(line.qty) || 1)) * Math.max(0, Number(line.unitPrice) || 0),
+          }));
+
+          if (customItems.length > 0) {
+            const { error: customItemsErr } = await supabase
+              .from("custom_food_request_items")
+              .insert(customItems);
+            if (customItemsErr) {
+              setLoading(false);
+              setMsg(
+                `Custom request items error: ${customItemsErr.message}. Run the SQL setup for custom_food_request_items table first.`
+              );
+              return;
+            }
+          }
+
+          continue;
+        }
+
         const { data: op, error: opErr } = await supabase
           .from("order_plates")
           .insert({
@@ -265,14 +325,21 @@ export default function FoodCheckoutPage() {
           return;
         }
 
-        const rows = p.lines.map((l) => ({
-          order_plate_id: op.id,
-          food_item_id: l.foodItemId,
-          variant_id: l.variantId ?? null,
-          qty: l.qty,
-          unit_price: l.unitPrice,
-          line_total: l.qty * l.unitPrice,
-        }));
+        const rows = p.lines
+          .filter((l) => typeof l.foodItemId === "string" && l.foodItemId.length > 0)
+          .map((l) => ({
+            order_plate_id: op.id,
+            food_item_id: l.foodItemId as string,
+            variant_id: l.variantId ?? null,
+            qty: l.qty,
+            unit_price: l.unitPrice,
+            line_total: l.qty * l.unitPrice,
+          }));
+        if (rows.length === 0) {
+          setLoading(false);
+          setMsg("Plate items error: no valid food items found for this plate.");
+          return;
+        }
 
         const { error: itemsErr } = await supabase.from("order_plate_items").insert(rows);
         if (itemsErr) {

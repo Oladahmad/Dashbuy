@@ -34,6 +34,12 @@ type ComboCartItem = {
   vendorName: string;
 };
 
+type CustomFoodLine = {
+  name: string;
+  qty: number;
+  unitPrice: number;
+};
+
 type CartPlate = {
   vendorId: string;
   vendorName: string;
@@ -43,6 +49,10 @@ type CartPlate = {
   plateTotal: number;
   lines: unknown[];
   createdAt: string;
+  customRequest?: {
+    restaurantName: string;
+    itemsSubtotal: number;
+  };
 };
 
 type FoodCart = {
@@ -93,7 +103,7 @@ function pickVendorName(p: { store_name: string | null; full_name: string | null
 }
 
 export default function FoodHubPage() {
-  const [tab, setTab] = useState<"combos" | "restaurants">("combos");
+  const [tab, setTab] = useState<"combos" | "restaurants" | "custom">("combos");
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [combos, setCombos] = useState<ComboRow[]>([]);
@@ -101,6 +111,12 @@ export default function FoodHubPage() {
   const [q, setQ] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedCombo, setSelectedCombo] = useState<ComboRow | null>(null);
+  const [restaurantName, setRestaurantName] = useState("");
+  const [customLines, setCustomLines] = useState<CustomFoodLine[]>([
+    { name: "", qty: 1, unitPrice: 0 },
+  ]);
+  const CUSTOM_VENDOR_ID = "custom_request";
+  const CUSTOM_PLATE_FEE = 200;
 
   useEffect(() => {
     (async () => {
@@ -162,6 +178,67 @@ export default function FoodHubPage() {
     alert("Added to cart");
   }
 
+  function addCustomLine() {
+    setCustomLines((prev) => [...prev, { name: "", qty: 1, unitPrice: 0 }]);
+  }
+
+  function removeCustomLine(index: number) {
+    setCustomLines((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function updateCustomLine(index: number, patch: Partial<CustomFoodLine>) {
+    setCustomLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+  }
+
+  function addCustomPlateToCart() {
+    const rest = restaurantName.trim();
+    if (!rest) {
+      alert("Enter restaurant name.");
+      return;
+    }
+
+    const validLines = customLines
+      .map((line) => ({
+        name: line.name.trim(),
+        qty: Math.max(1, Math.floor(Number(line.qty) || 0)),
+        unitPrice: Math.max(0, Number(line.unitPrice) || 0),
+      }))
+      .filter((line) => line.name.length > 0 && line.unitPrice > 0);
+
+    if (validLines.length === 0) {
+      alert("Add at least one food item with name and price.");
+      return;
+    }
+
+    const itemsSubtotal = validLines.reduce((sum, line) => sum + line.qty * line.unitPrice, 0);
+    const plateTotal = itemsSubtotal + CUSTOM_PLATE_FEE;
+
+    const cart = readFoodCart();
+    cart.plates.push({
+      vendorId: CUSTOM_VENDOR_ID,
+      vendorName: rest,
+      plateTemplateId: "__custom_request__",
+      plateName: `${rest} plate`,
+      plateFee: CUSTOM_PLATE_FEE,
+      plateTotal,
+      lines: validLines.map((line) => ({
+        name: line.name,
+        qty: line.qty,
+        unitPrice: line.unitPrice,
+      })),
+      createdAt: new Date().toISOString(),
+      customRequest: {
+        restaurantName: rest,
+        itemsSubtotal,
+      },
+    });
+
+    writeFoodCart(cart);
+    setRestaurantName("");
+    setCustomLines([{ name: "", qty: 1, unitPrice: 0 }]);
+    alert("Custom plate added to cart.");
+  }
+
   if (loading) return <main className="p-6">Loading...</main>;
   const detailsVendorName = selectedCombo ? pickVendorName(selectedCombo.profiles) : "Vendor";
 
@@ -183,6 +260,13 @@ export default function FoodHubPage() {
           type="button"
         >
           Restaurants
+        </button>
+        <button
+          className={`flex-1 rounded-xl border px-4 py-3 text-sm ${tab === "custom" ? "bg-black text-white" : "bg-white"}`}
+          onClick={() => setTab("custom")}
+          type="button"
+        >
+          Custom Plate
         </button>
       </div>
 
@@ -228,7 +312,7 @@ export default function FoodHubPage() {
             })}
           </div>
         </>
-      ) : (
+      ) : tab === "restaurants" ? (
         <div className="mt-4 grid gap-3">
           {restaurants.map((r) => (
             <a key={r.vendor_id} href={`/food/vendors/${r.vendor_id}`} className="rounded-2xl border bg-white p-4 flex items-center justify-between">
@@ -243,6 +327,90 @@ export default function FoodHubPage() {
             </a>
           ))}
         </div>
+      ) : (
+        <section className="mt-4 rounded-2xl border bg-white p-4">
+          <h2 className="text-lg font-semibold">Custom restaurant request</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Enter restaurant name, list the foods you want, set units and the normal restaurant price.
+          </p>
+
+          <div className="mt-4">
+            <label className="text-sm font-medium">Restaurant name</label>
+            <input
+              className="mt-1 w-full rounded-xl border p-3"
+              placeholder="e.g. Mama Put Ago"
+              value={restaurantName}
+              onChange={(e) => setRestaurantName(e.target.value)}
+            />
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {customLines.map((line, idx) => (
+              <div key={idx} className="rounded-xl border p-3">
+                <div className="grid grid-cols-12 gap-2">
+                  <div className="col-span-6">
+                    <label className="text-xs text-gray-600">Food</label>
+                    <input
+                      className="mt-1 w-full rounded-lg border px-3 py-2"
+                      placeholder="e.g Rice"
+                      value={line.name}
+                      onChange={(e) => updateCustomLine(idx, { name: e.target.value })}
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <label className="text-xs text-gray-600">Units</label>
+                    <input
+                      className="mt-1 w-full rounded-lg border px-3 py-2"
+                      type="number"
+                      min={1}
+                      value={line.qty}
+                      onChange={(e) => updateCustomLine(idx, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <label className="text-xs text-gray-600">Price</label>
+                    <input
+                      className="mt-1 w-full rounded-lg border px-3 py-2"
+                      type="number"
+                      min={0}
+                      value={line.unitPrice}
+                      onChange={(e) =>
+                        updateCustomLine(idx, {
+                          unitPrice: Math.max(0, Number(e.target.value) || 0),
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <p className="text-xs text-gray-600">Line total: {naira(line.qty * line.unitPrice)}</p>
+                  {customLines.length > 1 ? (
+                    <button
+                      type="button"
+                      className="rounded-lg border px-3 py-1 text-xs"
+                      onClick={() => removeCustomLine(idx)}
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 flex gap-2">
+            <button type="button" className="rounded-xl border px-4 py-2 text-sm" onClick={addCustomLine}>
+              Add food
+            </button>
+            <button
+              type="button"
+              className="rounded-xl bg-black px-4 py-2 text-sm text-white"
+              onClick={addCustomPlateToCart}
+            >
+              Add to food cart (plate fee {naira(CUSTOM_PLATE_FEE)})
+            </button>
+          </div>
+        </section>
       )}
 
       {detailsOpen && selectedCombo ? (

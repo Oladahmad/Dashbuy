@@ -4,10 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type PlateLine = {
-  foodItemId: string;
+  foodItemId?: string;
   name: string;
-  category: string;
-  pricingType: "fixed" | "per_scoop" | "per_unit" | "variant";
+  category?: string;
+  pricingType?: "fixed" | "per_scoop" | "per_unit" | "variant" | "custom";
   qty: number;
   unitPrice: number;
   unitLabel?: string | null;
@@ -24,6 +24,10 @@ type CartPlate = {
   plateTotal: number;
   lines: PlateLine[];
   createdAt: string;
+  customRequest?: {
+    restaurantName: string;
+    itemsSubtotal: number;
+  };
 };
 
 type ComboCartItem = {
@@ -199,6 +203,21 @@ export default function FoodCartPage() {
                       Remove
                     </button>
                   </div>
+                  {p.plateTemplateId === "__custom_request__" ? (
+                    <div className="mt-3 rounded border bg-gray-50 p-3">
+                      <p className="text-sm font-medium">Restaurant: {p.customRequest?.restaurantName ?? p.vendorName}</p>
+                      <div className="mt-2 space-y-1">
+                        {p.lines.map((line, lineIndex) => (
+                          <div key={lineIndex} className="flex items-center justify-between text-sm text-gray-700">
+                            <span>
+                              {line.name} x {line.qty}
+                            </span>
+                            <span>{formatNaira(Number(line.qty) * Number(line.unitPrice))}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
