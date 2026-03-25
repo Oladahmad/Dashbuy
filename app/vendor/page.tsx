@@ -262,7 +262,7 @@ export default function VendorDashboardPage() {
         <div className="rounded-2xl border bg-white p-4">
           <p className="font-semibold">Admin tools</p>
           <p className="mt-1 text-sm text-gray-600">Inspect custom restaurant request orders submitted from Food.</p>
-          <Link href="/vendor/admin/custom-food-requests" className="mt-3 block w-full rounded-xl border px-4 py-3 text-center">
+          <Link href="/admin/custom-food-requests" className="mt-3 block w-full rounded-xl border px-4 py-3 text-center">
             View custom food requests
           </Link>
         </div>

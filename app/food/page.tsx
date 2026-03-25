@@ -36,8 +36,8 @@ type ComboCartItem = {
 
 type CustomFoodLine = {
   name: string;
-  qty: number;
-  unitPrice: number;
+  qty: number | null;
+  unitPrice: number | null;
 };
 
 type CartPlate = {
@@ -113,7 +113,7 @@ export default function FoodHubPage() {
   const [selectedCombo, setSelectedCombo] = useState<ComboRow | null>(null);
   const [restaurantName, setRestaurantName] = useState("");
   const [customLines, setCustomLines] = useState<CustomFoodLine[]>([
-    { name: "", qty: 1, unitPrice: 0 },
+    { name: "", qty: null, unitPrice: null },
   ]);
   const CUSTOM_VENDOR_ID = "custom_request";
   const CUSTOM_PLATE_FEE = 200;
@@ -179,7 +179,7 @@ export default function FoodHubPage() {
   }
 
   function addCustomLine() {
-    setCustomLines((prev) => [...prev, { name: "", qty: 1, unitPrice: 0 }]);
+    setCustomLines((prev) => [...prev, { name: "", qty: null, unitPrice: null }]);
   }
 
   function removeCustomLine(index: number) {
@@ -200,8 +200,8 @@ export default function FoodHubPage() {
     const validLines = customLines
       .map((line) => ({
         name: line.name.trim(),
-        qty: Math.max(1, Math.floor(Number(line.qty) || 0)),
-        unitPrice: Math.max(0, Number(line.unitPrice) || 0),
+        qty: Math.max(1, Math.floor(Number(line.qty ?? 0))),
+        unitPrice: Math.max(0, Number(line.unitPrice ?? 0)),
       }))
       .filter((line) => line.name.length > 0 && line.unitPrice > 0);
 
@@ -235,7 +235,7 @@ export default function FoodHubPage() {
 
     writeFoodCart(cart);
     setRestaurantName("");
-    setCustomLines([{ name: "", qty: 1, unitPrice: 0 }]);
+    setCustomLines([{ name: "", qty: null, unitPrice: null }]);
     alert("Custom plate added to cart.");
   }
 
@@ -362,9 +362,13 @@ export default function FoodHubPage() {
                     <input
                       className="mt-1 w-full rounded-lg border px-3 py-2"
                       type="number"
-                      min={1}
-                      value={line.qty}
-                      onChange={(e) => updateCustomLine(idx, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                      inputMode="numeric"
+                      value={line.qty ?? ""}
+                      onChange={(e) =>
+                        updateCustomLine(idx, {
+                          qty: e.target.value === "" ? null : Math.max(1, Math.floor(Number(e.target.value) || 0)),
+                        })
+                      }
                     />
                   </div>
                   <div className="col-span-3">
@@ -372,18 +376,20 @@ export default function FoodHubPage() {
                     <input
                       className="mt-1 w-full rounded-lg border px-3 py-2"
                       type="number"
-                      min={0}
-                      value={line.unitPrice}
+                      inputMode="decimal"
+                      value={line.unitPrice ?? ""}
                       onChange={(e) =>
                         updateCustomLine(idx, {
-                          unitPrice: Math.max(0, Number(e.target.value) || 0),
+                          unitPrice: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0),
                         })
                       }
                     />
                   </div>
                 </div>
                 <div className="mt-2 flex items-center justify-between">
-                  <p className="text-xs text-gray-600">Line total: {naira(line.qty * line.unitPrice)}</p>
+                  <p className="text-xs text-gray-600">
+                    Line total: {naira((line.qty ?? 0) * (line.unitPrice ?? 0))}
+                  </p>
                   {customLines.length > 1 ? (
                     <button
                       type="button"
