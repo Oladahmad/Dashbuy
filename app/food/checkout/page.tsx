@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import { fallbackFoodOrderName } from "@/lib/orderName";
 
 type PlateLine = {
   foodItemId?: string;
@@ -227,6 +228,28 @@ export default function FoodCheckoutPage() {
       const vendorTotal = vendorSubtotal + DELIVERY_FEE;
       const foodMode: "plate" | "combo" = group.plates.length > 0 ? "plate" : "combo";
 
+      const candidateNames = [
+        ...group.plates.flatMap((p) => p.lines.map((line) => line.name ?? "").filter(Boolean)),
+        ...group.combos.map((c) => c.name),
+      ];
+      let generatedOrderName = fallbackFoodOrderName(candidateNames);
+      try {
+        const titleRes = await fetch("/api/ai/order-name", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            restaurantName: group.plates[0]?.customRequest?.restaurantName ?? group.plates[0]?.vendorName ?? "",
+            itemNames: candidateNames,
+          }),
+        });
+        const titleBody = (await titleRes.json().catch(() => null)) as { ok?: boolean; name?: string } | null;
+        if (titleBody?.ok && titleBody.name?.trim()) {
+          generatedOrderName = titleBody.name.trim();
+        }
+      } catch {
+        // Keep fallback title.
+      }
+
       const { data: order, error: orderErr } = await supabase
         .from("orders")
         .insert({
@@ -241,7 +264,7 @@ export default function FoodCheckoutPage() {
           delivery_address: deliveryAddressPayload,
           delivery_address_source: "manual",
           customer_phone: phoneClean,
-          notes: notesPayload ? notesPayload : null,
+          notes: [`Order name: ${generatedOrderName}`, notesPayload].filter(Boolean).join(" | "),
         })
         .select("id")
         .single();

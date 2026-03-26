@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import OrderTimeline from "@/components/OrderTimeline";
 import { resolveTrackingStatus } from "@/lib/orderTracking";
+import { extractOrderNameFromNotes } from "@/lib/orderName";
 
 type OrderRow = {
   id: string;
@@ -330,6 +331,10 @@ export default function VendorOrderDetailsPage() {
   const gross = useMemo(() => (order ? computeGross(order) : 0), [order]);
   const fee = useMemo(() => computeVendorFee(gross), [gross]);
   const net = useMemo(() => computeVendorNet(gross), [gross]);
+  const displayOrderName = useMemo(() => {
+    if (!order) return "";
+    return extractOrderNameFromNotes(order.notes);
+  }, [order]);
 
   async function updateStatus(nextStatus: string) {
     if (!order) return;
@@ -494,7 +499,7 @@ export default function VendorOrderDetailsPage() {
       <div className="rounded-2xl border bg-white p-4 flex items-center justify-between">
         <div>
           <p className="text-sm text-gray-600">Order details</p>
-          <p className="text-base font-semibold">#{id?.slice(0, 8) ?? ""}</p>
+          <p className="text-base font-semibold">{displayOrderName || `#${id?.slice(0, 8) ?? ""}`}</p>
         </div>
 
         <button type="button" className="rounded-xl border px-4 py-2 text-sm" onClick={() => router.back()}>
@@ -513,11 +518,12 @@ export default function VendorOrderDetailsPage() {
           <div className="rounded-2xl border bg-white p-4 space-y-2">
             <div className="flex items-center justify-between gap-3">
               <p className="font-semibold">
-                {order.order_type === "product"
+                {displayOrderName ||
+                (order.order_type === "product"
                   ? "Products order"
                   : (order.food_mode ?? "plate") === "combo"
                   ? "Food combo order"
-                  : "Food plate order"}
+                  : "Food plate order")}
               </p>
               <p className="text-sm text-gray-600">{formatDateTime(order.created_at)}</p>
             </div>

@@ -36,6 +36,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: requestsErr.message }, { status: 500 });
     }
 
+    const orderIds = (requests ?? []).map((r) => r.order_id).filter(Boolean);
+    let orderDeliveryFee: Array<{ id: string; delivery_fee: number | null; notes: string | null }> = [];
+    if (orderIds.length > 0) {
+      const { data: orderRows, error: orderRowsErr } = await supabaseAdmin
+        .from("orders")
+        .select("id,delivery_fee,notes")
+        .in("id", orderIds);
+      if (orderRowsErr) {
+        return NextResponse.json({ ok: false, error: orderRowsErr.message }, { status: 500 });
+      }
+      orderDeliveryFee = orderRows ?? [];
+    }
+
     const requestIds = (requests ?? []).map((r) => r.id);
     let items: Array<{
       id: string;
@@ -57,7 +70,7 @@ export async function GET(req: NextRequest) {
       items = rows ?? [];
     }
 
-    return NextResponse.json({ ok: true, requests: requests ?? [], items });
+    return NextResponse.json({ ok: true, requests: requests ?? [], items, orderDeliveryFee });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "Unexpected error" },

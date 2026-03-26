@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { extractOrderNameFromNotes } from "@/lib/orderName";
 
 type OrderRow = {
   id: string;
@@ -70,6 +71,8 @@ function isPaidStatus(status: string | null) {
 }
 
 function labelForOrder(o: OrderRow) {
+  const fromNotes = extractOrderNameFromNotes(o.notes);
+  if (fromNotes) return fromNotes;
   if (o.order_type === "product") return "Product Order";
   if ((o.food_mode ?? "plate") === "combo") return "Food Combo Order";
   return "Food Plate Order";

@@ -6,6 +6,7 @@ import OrderTimeline from "@/components/OrderTimeline";
 import { supabase } from "@/lib/supabaseClient";
 import { resolveTrackingStatus } from "@/lib/orderTracking";
 import { useParams, useRouter } from "next/navigation";
+import { extractOrderNameFromNotes } from "@/lib/orderName";
 
 type OrderRow = {
   id: string;
@@ -20,6 +21,7 @@ type OrderRow = {
   paystack_reference: string | null;
   vendor_id: string;
   customer_id: string;
+  notes: string | null;
 };
 
 type OrderSummary = {
@@ -35,6 +37,7 @@ type OrderSummary = {
   paystack_reference: string | null;
   customer_id: string;
   orderIds: string[];
+  orderName: string;
 };
 
 type VendorTrackingCard = {
@@ -103,6 +106,7 @@ function labelForOrder(o: OrderRow) {
 }
 
 function labelForSummary(o: OrderSummary) {
+  if (o.orderName.trim()) return o.orderName;
   if (o.order_type === "mixed") return "Combined order";
   if (o.order_type === "product") return "Products order";
   if ((o.food_mode ?? "plate") === "combo") return "Food combo order";
@@ -143,6 +147,8 @@ function summarizeOrders(orders: OrderRow[]): OrderSummary {
     paystack_reference: first.paystack_reference,
     customer_id: first.customer_id,
     orderIds: sorted.map((row) => row.id),
+    orderName:
+      sorted.map((row) => extractOrderNameFromNotes(row.notes)).find((name) => name.length > 0) ?? "",
   };
 }
 
@@ -185,7 +191,7 @@ export default function OrderDetailsPage() {
       const { data: o, error: oErr } = await supabase
         .from("orders")
         .select(
-          "id,order_type,food_mode,status,delivery_address,subtotal,delivery_fee,total,created_at,paystack_reference,vendor_id,customer_id"
+          "id,order_type,food_mode,status,delivery_address,subtotal,delivery_fee,total,created_at,paystack_reference,vendor_id,customer_id,notes"
         )
         .eq("id", id)
         .eq("customer_id", user.id)
@@ -204,7 +210,7 @@ export default function OrderDetailsPage() {
         const { data: siblings, error: siblingsErr } = await supabase
           .from("orders")
           .select(
-            "id,order_type,food_mode,status,delivery_address,subtotal,delivery_fee,total,created_at,paystack_reference,vendor_id,customer_id"
+            "id,order_type,food_mode,status,delivery_address,subtotal,delivery_fee,total,created_at,paystack_reference,vendor_id,customer_id,notes"
           )
           .eq("customer_id", user.id)
           .eq("paystack_reference", baseOrder.paystack_reference)
@@ -388,6 +394,7 @@ export default function OrderDetailsPage() {
           paystack_reference: prev.paystack_reference,
           vendor_id: "",
           customer_id: prev.customer_id,
+          notes: null,
         }));
         return { ...prev, status: groupStatus(fakeRows) };
       });

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import { extractOrderNameFromNotes } from "@/lib/orderName";
 
 type OrderRow = {
   id: string;
@@ -13,6 +14,7 @@ type OrderRow = {
   total: number | null;
   created_at: string;
   paystack_reference: string | null;
+  notes: string | null;
 };
 
 type OrderGroup = {
@@ -23,6 +25,7 @@ type OrderGroup = {
   total: number;
   created_at: string;
   orders: OrderRow[];
+  orderName: string;
 };
 
 type ProfileRow = {
@@ -119,6 +122,8 @@ function groupOrders(rows: OrderRow[]) {
         total: sorted.reduce((sum, item) => sum + Number(item.total ?? 0), 0),
         created_at: primary.created_at,
         orders: sorted,
+        orderName:
+          sorted.map((row) => extractOrderNameFromNotes(row.notes)).find((name) => name.length > 0) ?? "",
       };
     })
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -189,7 +194,7 @@ export default function AccountPage() {
 
       const { data: ord, error: ordErr } = await supabase
         .from("orders")
-        .select("id,order_type,food_mode,status,total,created_at,paystack_reference")
+        .select("id,order_type,food_mode,status,total,created_at,paystack_reference,notes")
         .eq("customer_id", user.id)
         .order("created_at", { ascending: false })
         .limit(12);
@@ -426,7 +431,7 @@ export default function AccountPage() {
                     className="rounded-2xl border p-4 text-left hover:bg-gray-50"
                   >
                     <div className="flex items-center justify-between">
-                      <p className="font-semibold">{labelForOrder(o)}</p>
+                      <p className="font-semibold">{o.orderName || labelForOrder(o)}</p>
                       <p className="font-bold">{naira(o.total ?? 0)}</p>
                     </div>
 

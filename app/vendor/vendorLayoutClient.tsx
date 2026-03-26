@@ -72,7 +72,12 @@ export default function VendorLayoutClient({ children }: { children: ReactNode }
       setRole(r);
       setStoreName(profile?.store_name?.trim() ? profile.store_name : "Vendor");
 
-      const isVendor = r === "vendor_food" || r === "vendor_products" || r === "admin";
+      if (r === "admin") {
+        router.replace("/admin/custom-food-requests");
+        return;
+      }
+
+      const isVendor = r === "vendor_food" || r === "vendor_products";
       if (!isVendor) {
         router.replace("/");
         return;

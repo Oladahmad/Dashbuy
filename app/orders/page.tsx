@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import { extractOrderNameFromNotes } from "@/lib/orderName";
 
 type OrderRow = {
   id: string;
@@ -13,6 +14,7 @@ type OrderRow = {
   total: number | null;
   created_at: string;
   paystack_reference: string | null;
+  notes: string | null;
 };
 
 type OrderGroup = {
@@ -24,6 +26,7 @@ type OrderGroup = {
   created_at: string;
   paystack_reference: string | null;
   orders: OrderRow[];
+  orderName: string;
 };
 
 function naira(n: number) {
@@ -43,6 +46,14 @@ function labelForOrder(o: Pick<OrderGroup, "order_type" | "food_mode">) {
   if (o.order_type === "product") return "Product Order";
   if ((o.food_mode ?? "plate") === "combo") return "Food Combo Order";
   return "Food Plate Order";
+}
+
+function groupOrderName(group: OrderRow[]) {
+  for (const row of group) {
+    const fromNotes = extractOrderNameFromNotes(row.notes);
+    if (fromNotes) return fromNotes;
+  }
+  return "";
 }
 
 function typeForOrder(o: Pick<OrderGroup, "order_type" | "food_mode">) {
@@ -126,6 +137,7 @@ export default function OrdersPage() {
           created_at: primary.created_at,
           paystack_reference: primary.paystack_reference,
           orders: sorted,
+          orderName: groupOrderName(sorted),
         };
       })
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -160,7 +172,7 @@ export default function OrdersPage() {
 
       const { data, error } = await supabase
         .from("orders")
-        .select("id,order_type,food_mode,status,total,created_at,paystack_reference")
+        .select("id,order_type,food_mode,status,total,created_at,paystack_reference,notes")
         .eq("customer_id", user.id)
         .order("created_at", { ascending: false });
 
@@ -238,6 +250,7 @@ export default function OrdersPage() {
                 >
                   <div className="flex items-center justify-between">
                     <p className="font-semibold">{labelForOrder(o)}</p>
+                    {o.orderName ? <p className="mt-1 text-xs text-gray-500">{o.orderName}</p> : null}
                     <p className="font-bold">{naira(o.total ?? 0)}</p>
                   </div>
 

@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import Link from "next/link";
+import { extractOrderNameFromNotes, fallbackFoodOrderName } from "@/lib/orderName";
 
 type RequestRow = {
   id: string;
@@ -32,6 +34,9 @@ export default function AdminCustomFoodRequestsPage() {
   const [msg, setMsg] = useState("");
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [items, setItems] = useState<ItemRow[]>([]);
+  const [orderDeliveryFee, setOrderDeliveryFee] = useState<
+    Array<{ id: string; delivery_fee: number | null; notes: string | null }>
+  >([]);
 
   useEffect(() => {
     (async () => {
@@ -58,6 +63,7 @@ export default function AdminCustomFoodRequestsPage() {
         error?: string;
         requests?: RequestRow[];
         items?: ItemRow[];
+        orderDeliveryFee?: Array<{ id: string; delivery_fee: number | null; notes: string | null }>;
       } | null;
 
       if (!res.ok || !body?.ok) {
@@ -68,6 +74,7 @@ export default function AdminCustomFoodRequestsPage() {
 
       setRequests(Array.isArray(body.requests) ? body.requests : []);
       setItems(Array.isArray(body.items) ? body.items : []);
+      setOrderDeliveryFee(Array.isArray(body.orderDeliveryFee) ? body.orderDeliveryFee : []);
       setLoading(false);
     })();
   }, []);
@@ -81,6 +88,34 @@ export default function AdminCustomFoodRequestsPage() {
     }
     return map;
   }, [items]);
+
+  const summary = useMemo(() => {
+    const foodAmount = requests.reduce(
+      (sum, r) => sum + Number(r.items_subtotal || 0) + Number(r.plate_fee || 0),
+      0
+    );
+    const feeMap = new Map(orderDeliveryFee.map((row) => [row.id, Number(row.delivery_fee || 0)]));
+    const deliveryFee = requests.reduce((sum, r) => sum + (feeMap.get(r.order_id) ?? 0), 0);
+    const grandTotal = foodAmount + deliveryFee;
+    return { foodAmount, deliveryFee, grandTotal };
+  }, [requests, orderDeliveryFee]);
+
+  const orderNameByOrderId = useMemo(() => {
+    const notesMap = new Map(orderDeliveryFee.map((row) => [row.id, row.notes]));
+    const map = new Map<string, string>();
+    for (const req of requests) {
+      const fromNotes = extractOrderNameFromNotes(notesMap.get(req.order_id) ?? "");
+      if (fromNotes) {
+        map.set(req.order_id, fromNotes);
+        continue;
+      }
+      const names = (itemsByRequest.get(req.id) ?? []).map((it) => it.food_name).filter(Boolean);
+      map.set(req.order_id, fallbackFoodOrderName(names));
+    }
+    return map;
+  }, [orderDeliveryFee, requests, itemsByRequest]);
+
+  const recentOrders = useMemo(() => requests.slice(0, 5), [requests]);
 
   return (
     <main className="space-y-4">
@@ -98,43 +133,77 @@ export default function AdminCustomFoodRequestsPage() {
         requests.length === 0 ? (
           <div className="rounded-2xl border bg-white p-4 text-sm text-gray-600">No custom requests yet.</div>
         ) : (
-          <div className="grid gap-3">
-            {requests.map((req) => (
-              <div key={req.id} className="rounded-2xl border bg-white p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-semibold">{req.restaurant_name}</p>
-                  <p className="text-xs text-gray-500">{new Date(req.created_at).toLocaleString()}</p>
-                </div>
-                <p className="mt-1 text-sm text-gray-600">{req.plate_name}</p>
-                <p className="mt-1 text-xs text-gray-500">Order ID: {req.order_id}</p>
-
-                <div className="mt-3 rounded-xl border bg-gray-50 p-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Items subtotal</span>
-                    <span className="font-semibold">{naira(req.items_subtotal)}</span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between text-sm">
-                    <span>Plate fee</span>
-                    <span className="font-semibold">{naira(req.plate_fee)}</span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between text-sm">
-                    <span>Total</span>
-                    <span className="font-semibold">{naira(req.total_amount)}</span>
-                  </div>
-                </div>
-
-                <div className="mt-3 space-y-1">
-                  {(itemsByRequest.get(req.id) ?? []).map((it) => (
-                    <div key={it.id} className="flex items-center justify-between text-sm">
-                      <span>
-                        {it.food_name} x {it.units}
-                      </span>
-                      <span>{naira(it.line_total)}</span>
-                    </div>
-                  ))}
-                </div>
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-xl border bg-white p-3">
+                <p className="text-xs text-gray-600">Items + plate fee</p>
+                <p className="mt-1 text-lg font-semibold">{naira(summary.foodAmount)}</p>
               </div>
-            ))}
+              <div className="rounded-xl border bg-white p-3">
+                <p className="text-xs text-gray-600">Delivery fee</p>
+                <p className="mt-1 text-lg font-semibold">{naira(summary.deliveryFee)}</p>
+              </div>
+              <div className="rounded-xl border bg-white p-3">
+                <p className="text-xs text-gray-600">Grand total</p>
+                <p className="mt-1 text-lg font-semibold">{naira(summary.grandTotal)}</p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-white p-4">
+              <p className="font-semibold">Recent request orders</p>
+              <div className="mt-3 grid gap-2">
+                {recentOrders.map((req) => (
+                  <Link href={`/admin/custom-food-requests/${req.id}`} key={`recent-${req.id}`} className="block rounded-xl border p-3 hover:bg-gray-50">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium truncate">{orderNameByOrderId.get(req.order_id) || "Food order"}</p>
+                      <p className="text-sm font-semibold">{naira(req.total_amount)}</p>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-600">
+                      {req.restaurant_name} - {new Date(req.created_at).toLocaleString()}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-3">
+              {requests.map((req) => (
+                <Link key={req.id} href={`/admin/custom-food-requests/${req.id}`} className="block rounded-2xl border bg-white p-4 hover:bg-gray-50">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold truncate">{orderNameByOrderId.get(req.order_id) || "Food order"}</p>
+                    <p className="text-xs text-gray-500">{new Date(req.created_at).toLocaleString()}</p>
+                  </div>
+                  <p className="mt-1 text-sm text-gray-600">{req.restaurant_name}</p>
+                  <p className="mt-1 text-xs text-gray-500">{req.plate_name}</p>
+
+                  <div className="mt-3 rounded-xl border bg-gray-50 p-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span>Items subtotal</span>
+                      <span className="font-semibold">{naira(req.items_subtotal)}</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-sm">
+                      <span>Plate fee</span>
+                      <span className="font-semibold">{naira(req.plate_fee)}</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-sm">
+                      <span>Total</span>
+                      <span className="font-semibold">{naira(req.total_amount)}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 space-y-1">
+                    {(itemsByRequest.get(req.id) ?? []).map((it) => (
+                      <div key={it.id} className="flex items-center justify-between text-sm">
+                        <span>
+                          {it.food_name} x {it.units}
+                        </span>
+                        <span>{naira(it.line_total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Link>
+              ))}
+            </div>
           </div>
         )
       ) : null}

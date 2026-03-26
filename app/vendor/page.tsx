@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { extractOrderNameFromNotes } from "@/lib/orderName";
 
 type Role = "customer" | "vendor_food" | "vendor_products" | "admin";
 
@@ -284,13 +285,14 @@ export default function VendorDashboardPage() {
           ) : (
             recentOrders.map((row, idx) => {
               const id = pickString(row, ["id", "order_id"]) || `order ${idx + 1}`;
+              const orderName = extractOrderNameFromNotes(pickString(row, ["notes"]));
               const status = pickString(row, ["status"]) || "pending";
               const createdAt = pickString(row, ["created_at", "inserted_at"]);
               const amount = orderCommissionBase(row);
               return (
                 <div key={idx} className="rounded-xl border p-3">
                   <div className="flex items-center justify-between">
-                    <p className="font-medium truncate">{id}</p>
+                    <p className="font-medium truncate">{orderName || id}</p>
                     <p className="text-sm">{formatNaira(amount)}</p>
                   </div>
                   <p className="mt-1 text-xs text-gray-500">
