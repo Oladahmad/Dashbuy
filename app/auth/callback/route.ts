@@ -4,7 +4,6 @@ import { createClient } from "@supabase/supabase-js";
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
-  const next = url.searchParams.get("next") || "/";
 
   if (!code) return NextResponse.redirect(new URL("/auth/login", url));
 
@@ -28,11 +27,13 @@ export async function GET(req: Request) {
     .eq("id", userId)
     .maybeSingle();
 
-  const role = profile?.role || "user";
+  const role = profile?.role || "customer";
+  const loginUrl = new URL("/auth/login", url);
+  loginUrl.searchParams.set("confirmed", "1");
 
   if (role === "vendor_food" || role === "vendor_products") {
-    return NextResponse.redirect(new URL("/vendor", url));
+    loginUrl.searchParams.set("mode", "vendor");
   }
 
-  return NextResponse.redirect(new URL(next, url));
+  return NextResponse.redirect(loginUrl);
 }
