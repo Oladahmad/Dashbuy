@@ -5,6 +5,7 @@ type ReqBody = {
   category?: string;
   price?: number | string;
   stockQty?: number | string;
+  features?: Array<{ key?: string; value?: string }>;
   imageUrl?: string;
   imageDataUrl?: string;
 };
@@ -69,6 +70,14 @@ export async function POST(req: Request) {
   const category = clean(body.category);
   const price = toNumber(body.price);
   const stockQty = toNumber(body.stockQty);
+  const features = Array.isArray(body.features)
+    ? body.features
+        .map((f) => ({
+          key: clean(f?.key),
+          value: clean(f?.value),
+        }))
+        .filter((f) => f.key && f.value)
+    : [];
   const imageUrl = clean(body.imageUrl);
   const imageDataUrl = clean(body.imageDataUrl);
 
@@ -81,6 +90,9 @@ export async function POST(req: Request) {
     `Category: ${category || "Others"}`,
     `Price: ${price !== null ? price : "Not provided"}`,
     `Stock quantity: ${stockQty !== null ? stockQty : "Not provided"}`,
+    features.length > 0
+      ? `Features:\n${features.map((f) => `- ${f.key}: ${f.value}`).join("\n")}`
+      : "",
   ].join("\n");
 
   const prompt = [
