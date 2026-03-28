@@ -52,7 +52,7 @@ function countCartItemsFromUnknownShape(value: unknown): number {
   if (!value) return 0;
 
   const direct = asArray(value);
-  if (direct) return direct.length;
+  if (direct) return sumQty(direct);
 
   if (!isRecord(value)) return 0;
 
@@ -63,10 +63,8 @@ function countCartItemsFromUnknownShape(value: unknown): number {
   if (cart) return sumQty(cart);
 
   const plates = asArray(value.plates);
-  if (plates) return sumQty(plates);
-
   const combos = asArray(value.combos);
-  if (combos) return sumQty(combos);
+  if (plates || combos) return sumQty(plates ?? []) + sumQty(combos ?? []);
 
   return 0;
 }

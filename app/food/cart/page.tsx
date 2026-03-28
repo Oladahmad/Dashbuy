@@ -170,98 +170,138 @@ export default function FoodCartPage() {
   const isEmpty = plates.length === 0 && combos.length === 0;
 
   return (
-    <main className="p-6 max-w-3xl">
-      <h1 className="text-xl font-bold sm:text-2xl">Food Cart</h1>
+    <main className="mx-auto max-w-3xl space-y-4 p-4">
+      <button
+        type="button"
+        className="rounded-xl border px-3 py-2 text-sm"
+        onClick={() => router.push("/food")}
+      >
+        Back
+      </button>
 
-      {vendorName ? (
-        <p className="mt-2 text-gray-600">
-          Vendor: <strong>{vendorName}</strong>
-        </p>
-      ) : null}
+      <div className="rounded-2xl border bg-white p-4">
+        <h1 className="text-xl font-bold sm:text-2xl">Food Cart</h1>
+        {vendorName ? (
+          <p className="mt-2 text-sm text-gray-600">
+            Vendor: <strong>{vendorName}</strong>
+          </p>
+        ) : null}
+      </div>
 
       {isEmpty ? (
-        <div className="mt-6 rounded border p-4">
-          <p className="text-gray-600">Your cart is empty.</p>
-          <button className="mt-3 rounded bg-black px-4 py-2 text-white" onClick={() => router.push("/food")}>
+        <div className="rounded-2xl border bg-white p-5">
+          <p className="font-semibold">Your cart is empty.</p>
+          <p className="mt-1 text-sm text-gray-600">Add food items and they will show here.</p>
+          <button
+            type="button"
+            className="mt-4 w-full rounded-xl bg-black px-4 py-3 text-white"
+            onClick={() => router.push("/food")}
+          >
             Browse food
           </button>
         </div>
       ) : (
         <>
           {plates.length > 0 ? (
-            <div className="mt-6 grid gap-3">
-              {plates.map((p, idx) => (
-                <div key={p.createdAt + idx} className="rounded border p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold">{p.plateName}</p>
-                      <p className="text-sm text-gray-600">
-                        Plate total: <strong>{formatNaira(Number(p.plateTotal))}</strong>
-                      </p>
-                    </div>
-                    <button className="rounded border px-3 py-1" onClick={() => removePlate(idx)}>
-                      Remove
-                    </button>
-                  </div>
-                  {p.plateTemplateId === "__custom_request__" ? (
-                    <div className="mt-3 rounded border bg-gray-50 p-3">
-                      <p className="text-sm font-medium">Restaurant: {p.customRequest?.restaurantName ?? p.vendorName}</p>
-                      <div className="mt-2 space-y-1">
-                        {p.lines.map((line, lineIndex) => (
-                          <div key={lineIndex} className="flex items-center justify-between text-sm text-gray-700">
-                            <span>
-                              {line.name} x {line.qty}
-                            </span>
-                            <span>{formatNaira(Number(line.qty) * Number(line.unitPrice))}</span>
-                          </div>
-                        ))}
+            <div className="rounded-2xl border bg-white p-4">
+              <p className="font-semibold">Plates</p>
+              <div className="mt-3 grid gap-3">
+                {plates.map((p, idx) => (
+                  <div key={p.createdAt + idx} className="rounded-xl border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold">{p.plateName}</p>
+                        <p className="text-sm text-gray-600">
+                          Plate total: <strong>{formatNaira(Number(p.plateTotal))}</strong>
+                        </p>
                       </div>
+                      <button
+                        type="button"
+                        className="rounded-lg border px-3 py-1.5 text-sm"
+                        onClick={() => removePlate(idx)}
+                      >
+                        Remove
+                      </button>
                     </div>
-                  ) : null}
-                </div>
-              ))}
+                    {p.plateTemplateId === "__custom_request__" ? (
+                      <div className="mt-3 rounded-lg border bg-gray-50 p-3">
+                        <p className="text-sm font-medium">Restaurant: {p.customRequest?.restaurantName ?? p.vendorName}</p>
+                        <div className="mt-2 space-y-1">
+                          {p.lines.map((line, lineIndex) => (
+                            <div key={lineIndex} className="flex items-center justify-between text-sm text-gray-700">
+                              <span>
+                                {line.name} x {line.qty}
+                              </span>
+                              <span>{formatNaira(Number(line.qty) * Number(line.unitPrice))}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
 
           {combos.length > 0 ? (
-            <div className="mt-6 grid gap-3">
-              {combos.map((it) => (
-                <div key={it.comboId} className="rounded border p-4 flex justify-between">
-                  <div>
-                    <p className="font-semibold">{it.name}</p>
-                    <p className="mt-1 text-sm text-gray-600">
-                      {formatNaira(it.price)} x {it.qty} = <strong>{formatNaira(it.price * it.qty)}</strong>
-                    </p>
+            <div className="rounded-2xl border bg-white p-4">
+              <p className="font-semibold">Combos</p>
+              <div className="mt-3 grid gap-3">
+                {combos.map((it) => (
+                  <div key={it.comboId} className="rounded-xl border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold">{it.name}</p>
+                        <p className="mt-1 text-sm text-gray-600">
+                          {formatNaira(it.price)} x {it.qty} = <strong>{formatNaira(it.price * it.qty)}</strong>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="rounded-lg border px-3 py-1"
+                          onClick={() => decCombo(it.comboId)}
+                        >
+                          -
+                        </button>
+                        <span className="w-8 text-center">{it.qty}</span>
+                        <button
+                          type="button"
+                          className="rounded-lg border px-3 py-1"
+                          onClick={() => incCombo(it.comboId)}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button className="rounded border px-3 py-1" onClick={() => decCombo(it.comboId)}>
-                      -
-                    </button>
-                    <span className="w-8 text-center">{it.qty}</span>
-                    <button className="rounded border px-3 py-1" onClick={() => incCombo(it.comboId)}>
-                      +
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           ) : null}
 
-          <div className="mt-6 rounded border p-4 flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Subtotal</p>
-              <p className="text-xl font-bold">{formatNaira(subtotal)}</p>
-              <p className="mt-1 text-sm text-gray-600">
-                Delivery fee ({vendorCount} vendor{vendorCount === 1 ? "" : "s"}): {formatNaira(deliveryFee)}
-              </p>
-              <p className="mt-1 text-sm font-semibold">Total: {formatNaira(total)}</p>
-            </div>
+          <div className="rounded-2xl border bg-white p-4">
+            <p className="text-sm text-gray-600">Subtotal</p>
+            <p className="text-xl font-bold">{formatNaira(subtotal)}</p>
+            <p className="mt-1 text-sm text-gray-600">
+              Delivery fee ({vendorCount} vendor{vendorCount === 1 ? "" : "s"}): {formatNaira(deliveryFee)}
+            </p>
+            <p className="mt-1 text-sm font-semibold">Total: {formatNaira(total)}</p>
 
-            <div className="flex gap-2">
-              <button className="rounded border px-4 py-2" onClick={clearCart}>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                className="rounded-xl border px-4 py-3"
+                onClick={clearCart}
+              >
                 Clear
               </button>
-              <button className="rounded bg-black px-4 py-2 text-white" onClick={() => router.push("/food/checkout")}>
+              <button
+                type="button"
+                className="rounded-xl bg-black px-4 py-3 text-white"
+                onClick={() => router.push("/food/checkout")}
+              >
                 Checkout
               </button>
             </div>

@@ -93,6 +93,8 @@ export default function VendorNewFoodPage() {
 
   const showSingleFields = foodType === "single";
   const showComboFields = foodType === "combo";
+  const hasPlates = plates.length > 0;
+  const singleLocked = showSingleFields && !hasPlates;
 
   const showUnitPricing =
     showSingleFields && (pricingType === "per_scoop" || pricingType === "per_unit");
@@ -112,6 +114,8 @@ export default function VendorNewFoodPage() {
     if (!n) return false;
 
     if (!imageFile) return false;
+
+    if (showSingleFields && !hasPlates) return false;
 
     if (foodType === "combo") {
       const p = toNumberOrNull(fixedPrice);
@@ -140,7 +144,7 @@ export default function VendorNewFoodPage() {
     }
 
     return false;
-  }, [name, imageFile, foodType, pricingType, fixedPrice, stockQty, unitPrice, variants]);
+  }, [name, imageFile, showSingleFields, hasPlates, foodType, pricingType, fixedPrice, stockQty, unitPrice, variants]);
 
   useEffect(() => {
     (async () => {
@@ -251,6 +255,11 @@ export default function VendorNewFoodPage() {
 
     if (!imageFile) {
       setErr("Food image is required");
+      return;
+    }
+
+    if (singleLocked) {
+      setErr("Add at least one plate first before listing single foods.");
       return;
     }
 
@@ -507,6 +516,11 @@ export default function VendorNewFoodPage() {
           <p className="mt-2 text-xs text-gray-600">
             Single means customer builds plate, combo means fixed price like a product.
           </p>
+          {singleLocked ? (
+            <p className="mt-2 text-xs font-medium text-red-600">
+              Add at least one plate first before listing single foods.
+            </p>
+          ) : null}
         </div>
 
         <div>
@@ -516,7 +530,7 @@ export default function VendorNewFoodPage() {
             placeholder="Eg Jollof rice"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            disabled={saving}
+            disabled={saving || singleLocked}
           />
         </div>
 
@@ -530,7 +544,7 @@ export default function VendorNewFoodPage() {
               type="file"
               accept="image/*"
               onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
-              disabled={saving}
+              disabled={saving || singleLocked}
             />
             {imageFile ? <p className="mt-2 text-xs text-gray-700">Selected: {imageFile.name}</p> : null}
           </div>
@@ -593,7 +607,7 @@ export default function VendorNewFoodPage() {
                   className="mt-1 w-full rounded-xl border px-3 py-3"
                   value={category}
                   onChange={(e) => setCategory(e.target.value as FoodCategory)}
-                  disabled={saving}
+                  disabled={saving || singleLocked}
                 >
                   <option value="main">Main</option>
                   <option value="side">Side</option>
@@ -617,7 +631,7 @@ export default function VendorNewFoodPage() {
                     setFixedPrice("");
                     setUnitPrice("");
                   }}
-                  disabled={saving}
+                  disabled={saving || singleLocked}
                 >
                   <option value="per_scoop">Per scoop</option>
                   <option value="per_unit">Per unit</option>
@@ -636,7 +650,7 @@ export default function VendorNewFoodPage() {
                     placeholder={recommendedUnitLabel || "Eg Scoop"}
                     value={unitLabel}
                     onChange={(e) => setUnitLabel(e.target.value)}
-                    disabled={saving}
+                    disabled={saving || singleLocked}
                   />
                 </div>
 
@@ -648,7 +662,7 @@ export default function VendorNewFoodPage() {
                     value={unitPrice}
                     onChange={(e) => setUnitPrice(e.target.value)}
                     inputMode="numeric"
-                    disabled={saving}
+                    disabled={saving || singleLocked}
                   />
                 </div>
               </div>
@@ -664,7 +678,7 @@ export default function VendorNewFoodPage() {
                     value={fixedPrice}
                     onChange={(e) => setFixedPrice(e.target.value)}
                     inputMode="numeric"
-                    disabled={saving}
+                    disabled={saving || singleLocked}
                   />
                 </div>
 
@@ -675,7 +689,7 @@ export default function VendorNewFoodPage() {
                     placeholder="Eg Portion"
                     value={unitLabel}
                     onChange={(e) => setUnitLabel(e.target.value)}
-                    disabled={saving}
+                    disabled={saving || singleLocked}
                   />
                 </div>
               </div>
@@ -703,7 +717,7 @@ export default function VendorNewFoodPage() {
                               copy[idx] = { ...copy[idx], name: e.target.value };
                               setVariants(copy);
                             }}
-                            disabled={saving}
+                            disabled={saving || singleLocked}
                           />
                         </div>
 
@@ -719,7 +733,7 @@ export default function VendorNewFoodPage() {
                               setVariants(copy);
                             }}
                             inputMode="numeric"
-                            disabled={saving}
+                            disabled={saving || singleLocked}
                           />
                         </div>
                       </div>
@@ -733,7 +747,7 @@ export default function VendorNewFoodPage() {
                             copy[idx] = { ...copy[idx], is_available: e.target.checked };
                             setVariants(copy);
                           }}
-                          disabled={saving}
+                          disabled={saving || singleLocked}
                         />
                         Available
                       </label>
@@ -749,7 +763,7 @@ export default function VendorNewFoodPage() {
                               copy.length ? copy : [{ name: "", price: "", is_available: true }]
                             );
                           }}
-                          disabled={saving}
+                          disabled={saving || singleLocked}
                         >
                           Remove
                         </button>
@@ -762,7 +776,7 @@ export default function VendorNewFoodPage() {
                   type="button"
                   className="mt-3 w-full rounded-xl border px-4 py-3 text-sm"
                   onClick={() => setVariants([...variants, { name: "", price: "", is_available: true }])}
-                  disabled={saving}
+                  disabled={saving || singleLocked}
                 >
                   Add another variant
                 </button>

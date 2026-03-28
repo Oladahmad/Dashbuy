@@ -83,6 +83,13 @@ export default function ProductsCartPage() {
 
   return (
     <AppShell title="Cart">
+      <button
+        type="button"
+        className="mb-3 rounded-xl border px-3 py-2 text-sm"
+        onClick={() => router.push("/products")}
+      >
+        Back
+      </button>
       {items.length === 0 ? (
         <div className="rounded-2xl border bg-white p-5">
           <p className="font-semibold">Your cart is empty</p>

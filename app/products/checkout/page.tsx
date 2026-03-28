@@ -252,6 +252,13 @@ export default function ProductCheckoutPage() {
 
   return (
     <main className="mx-auto max-w-2xl p-4">
+      <button
+        type="button"
+        className="mb-3 rounded-xl border px-3 py-2 text-sm"
+        onClick={() => router.push("/products/cart")}
+      >
+        Back
+      </button>
       <h1 className="text-xl font-bold sm:text-2xl">Checkout</h1>
 
       {vendorCount === 1 && vendorName ? <p className="mt-2 text-gray-600">Vendor: {vendorName}</p> : null}
