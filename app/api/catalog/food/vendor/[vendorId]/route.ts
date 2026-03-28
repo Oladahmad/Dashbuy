@@ -31,12 +31,16 @@ export async function GET(_: Request, { params }: Params) {
   const { data: plates, error: platesError } = await supabaseAdmin
     .from("plate_templates")
     .select("id,name,plate_fee,is_active")
+    .eq("vendor_id", vendorId)
     .eq("is_active", true)
     .order("plate_fee", { ascending: true });
 
   if (platesError) {
+    const plateErrorMessage = platesError.message.includes("plate_templates.vendor_id")
+      ? "Database update needed: add vendor_id column to plate_templates first."
+      : platesError.message;
     return NextResponse.json(
-      { ok: false, error: "Plates error: " + platesError.message, vendor, plates: [], items: [], variants: [] },
+      { ok: false, error: "Plates error: " + plateErrorMessage, vendor, plates: [], items: [], variants: [] },
       { status: 500 }
     );
   }

@@ -117,7 +117,7 @@ export default function ProductVendorSignupPage() {
       return;
     }
 
-    setMsg("Vendor account created. Verify your email, then sign in.");
+    setMsg("Vendor account created. Check your inbox or spam for verification email, then sign in.");
   }
 
   return (

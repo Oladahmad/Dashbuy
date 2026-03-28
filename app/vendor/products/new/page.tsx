@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { PRODUCT_CATEGORIES, normalizeProductCategory } from "@/lib/productCategories";
+import { ProductCategory, PRODUCT_CATEGORIES, normalizeProductCategory } from "@/lib/productCategories";
+import { getProductFeatureOptions, getProductFeaturePlaceholder } from "@/lib/productFeatures";
 
 type Role = "customer" | "vendor_food" | "vendor_products" | "admin";
 type FeatureField = { key: string; value: string };
@@ -24,6 +25,13 @@ function toIntOrNull(s: string) {
   return v >= 0 ? v : null;
 }
 
+function splitFeatureValues(raw: string) {
+  return raw
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
 export default function VendorProductsNewPage() {
   const router = useRouter();
 
@@ -38,11 +46,10 @@ export default function VendorProductsNewPage() {
   const [desc, setDesc] = useState("");
   const [category, setCategory] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
-  const [features, setFeatures] = useState<FeatureField[]>([
-    { key: "", value: "" },
-    { key: "", value: "" },
-    { key: "", value: "" },
-  ]);
+  const [features, setFeatures] = useState<FeatureField[]>([]);
+  const [featureKey, setFeatureKey] = useState("");
+  const [featureValue, setFeatureValue] = useState("");
+  const featureOptions = getProductFeatureOptions(category as ProductCategory | "");
 
   useEffect(() => {
     let alive = true;
@@ -87,15 +94,15 @@ export default function VendorProductsNewPage() {
     const q = toIntOrNull(stockQty);
 
     if (!name.trim()) {
-      setFieldErrors({ name: "Enter product name first" });
+      setFieldErrors({ description: "To generate AI text, enter Product name first." });
       return;
     }
     if (!category) {
-      setFieldErrors({ category: "Select category first" });
+      setFieldErrors({ description: "To generate AI text, select Category first." });
       return;
     }
     if (p === null || p <= 0) {
-      setFieldErrors({ price: "Enter price first" });
+      setFieldErrors({ description: "To generate AI text, enter Price first." });
       return;
     }
 
@@ -136,6 +143,28 @@ export default function VendorProductsNewPage() {
     }
 
     setDesc(body.description);
+  }
+
+  function addFeature() {
+    const key = featureKey.trim();
+    const values = splitFeatureValues(featureValue);
+    if (!key || values.length === 0) {
+      setFieldErrors((prev) => ({ ...prev, form: "Select a feature and enter its value before adding." }));
+      return;
+    }
+    setFeatures((prev) => {
+      const i = prev.findIndex((x) => x.key === key);
+      if (i < 0) return [...prev, { key, value: values.join(", ") }];
+
+      const existing = splitFeatureValues(prev[i].value);
+      const merged = Array.from(new Set([...existing, ...values]));
+      const next = [...prev];
+      next[i] = { ...next[i], value: merged.join(", ") };
+      return next;
+    });
+    setFeatureKey("");
+    setFeatureValue("");
+    setFieldErrors((prev) => ({ ...prev, form: undefined }));
   }
 
   async function onCreate() {
@@ -235,18 +264,6 @@ export default function VendorProductsNewPage() {
 
       <div className="rounded-2xl border bg-white p-4 space-y-3">
         <div>
-          <label className="text-sm text-gray-700">Image</label>
-          <input
-            className="mt-2 w-full"
-            type="file"
-            accept="image/*"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            disabled={!isAllowed}
-          />
-          {fieldErrors.image ? <p className="mt-1 text-xs text-red-600">{fieldErrors.image}</p> : null}
-        </div>
-
-        <div>
           <label className="text-sm text-gray-700">Name</label>
           <input
             className="mt-1 w-full rounded-xl border px-3 py-3"
@@ -259,6 +276,23 @@ export default function VendorProductsNewPage() {
             disabled={!isAllowed}
           />
           {fieldErrors.name ? <p className="mt-1 text-xs text-red-600">{fieldErrors.name}</p> : null}
+        </div>
+
+        <div>
+          <label className="text-sm text-gray-700">Image</label>
+          <div className="mt-2 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-3">
+            <p className="text-sm font-medium text-gray-800">Add product image</p>
+            <p className="mt-1 text-xs text-gray-600">Choose a clear image so buyers can trust what they are ordering.</p>
+            <input
+              className="mt-3 w-full rounded-xl border bg-white px-3 py-3 text-sm"
+              type="file"
+              accept="image/*"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              disabled={!isAllowed}
+            />
+            {file ? <p className="mt-2 text-xs text-gray-700">Selected: {file.name}</p> : null}
+          </div>
+          {fieldErrors.image ? <p className="mt-1 text-xs text-red-600">{fieldErrors.image}</p> : null}
         </div>
 
         <div>
@@ -281,7 +315,7 @@ export default function VendorProductsNewPage() {
           <label className="text-sm text-gray-700">Stock quantity</label>
           <input
             className="mt-1 w-full rounded-xl border px-3 py-3"
-            placeholder="Enter stock quantity"
+            placeholder="How many units do you have now? e.g 25"
             value={stockQty}
             onChange={(e) => {
               setStockQty(e.target.value);
@@ -290,6 +324,7 @@ export default function VendorProductsNewPage() {
             inputMode="numeric"
             disabled={!isAllowed}
           />
+          <p className="mt-1 text-xs text-gray-500">This is the total number of units currently available for sale.</p>
           {fieldErrors.stockQty ? <p className="mt-1 text-xs text-red-600">{fieldErrors.stockQty}</p> : null}
         </div>
 
@@ -322,55 +357,65 @@ export default function VendorProductsNewPage() {
             <label className="text-sm text-gray-700">Features</label>
             <p className="text-xs text-gray-500">Optional</p>
           </div>
+          <p className="mt-1 text-xs text-gray-600">
+            Features are key product details buyers check before buying (for example size, color, material, storage).
+            You can add multiple values for one feature using comma, for example: Black, White, Orange or 42-45.
+          </p>
 
-          <div className="mt-2 space-y-2">
-            {features.map((f, idx) => (
-              <div key={idx} className="grid grid-cols-[1fr_1fr_auto] gap-2">
-                <input
-                  className="w-full rounded-xl border px-3 py-3"
-                  placeholder={idx === 0 ? "e.g Size" : idx === 1 ? "e.g Colour" : "e.g Material"}
-                  value={f.key}
-                  onChange={(e) => {
-                    const next = [...features];
-                    next[idx] = { ...next[idx], key: e.target.value };
-                    setFeatures(next);
-                  }}
-                  disabled={!isAllowed}
-                />
-                <input
-                  className="w-full rounded-xl border px-3 py-3"
-                  placeholder="Enter value"
-                  value={f.value}
-                  onChange={(e) => {
-                    const next = [...features];
-                    next[idx] = { ...next[idx], value: e.target.value };
-                    setFeatures(next);
-                  }}
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  disabled={!isAllowed}
-                />
-                <button
-                  type="button"
-                  className="rounded-xl border px-3 py-3 text-sm"
-                  disabled={!isAllowed || loading || features.length <= 1}
-                  onClick={() => setFeatures((prev) => prev.filter((_, i) => i !== idx))}
-                  aria-label={`Remove feature ${idx + 1}`}
-                >
-                  -
-                </button>
-              </div>
-            ))}
+          <div className="mt-2 grid grid-cols-[1fr_1fr_auto] gap-2">
+            <select
+              className="w-full rounded-lg border px-2 py-2 text-sm"
+              value={featureKey}
+              onChange={(e) => setFeatureKey(e.target.value)}
+              disabled={!isAllowed}
+            >
+              <option value="">Select feature</option>
+              {featureOptions.map((opt) => (
+                <option key={opt.name} value={opt.name}>
+                  {opt.name}
+                </option>
+              ))}
+            </select>
+            <input
+              className="w-full rounded-lg border px-2 py-2 text-sm"
+              placeholder={featureKey ? `${getProductFeaturePlaceholder(featureKey)} (comma for multiple)` : "Enter value(s)"}
+              value={featureValue}
+              onChange={(e) => setFeatureValue(e.target.value)}
+              disabled={!isAllowed}
+            />
+            <button
+              type="button"
+              className="rounded-lg border px-3 py-2 text-xs"
+              disabled={!isAllowed || loading}
+              onClick={addFeature}
+            >
+              Add
+            </button>
           </div>
 
-          <button
-            type="button"
-            className="mt-2 rounded-lg border px-3 py-2 text-xs"
-            disabled={!isAllowed || loading}
-            onClick={() => setFeatures((prev) => [...prev, { key: "", value: "" }])}
-          >
-            Add more features
-          </button>
+          <div className="mt-2 rounded-lg border bg-gray-50 p-2">
+            {features.length === 0 ? (
+              <p className="text-xs text-gray-500">No feature added yet.</p>
+            ) : (
+              <div className="space-y-1">
+                {features.map((f) => (
+                  <div key={f.key} className="flex items-center justify-between rounded-md border bg-white px-2 py-2">
+                    <p className="truncate text-sm">
+                      <span className="font-medium">{f.key}:</span> {f.value}
+                    </p>
+                    <button
+                      type="button"
+                      className="ml-3 rounded-md border px-2 py-1 text-xs text-red-600"
+                      disabled={!isAllowed || loading}
+                      onClick={() => setFeatures((prev) => prev.filter((x) => x.key !== f.key))}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div>

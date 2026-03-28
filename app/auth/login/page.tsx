@@ -187,6 +187,19 @@ function LoginPageInner() {
             {loading ? "Signing in..." : "Sign in"}
           </button>
 
+          <div className="rounded-xl border bg-gray-50 px-3 py-3">
+            <p className="text-xs text-gray-600">Forgot your password?</p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-sm text-gray-800">Reset it securely and continue.</p>
+              <a
+                className="shrink-0 rounded-lg border bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-100"
+                href="/auth/reset-password"
+              >
+                Reset password
+              </a>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between text-sm">
             <a className="underline" href="/auth/signup">
               Create account

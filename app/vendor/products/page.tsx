@@ -36,6 +36,7 @@ export default function VendorProductsPage() {
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -105,6 +106,7 @@ export default function VendorProductsPage() {
 
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, is_available: nextAvailable } : r)));
     setActionId(null);
+    setOpenMenuId(null);
   }
 
   async function deleteProduct(id: string) {
@@ -132,6 +134,7 @@ export default function VendorProductsPage() {
 
     setRows((prev) => prev.filter((r) => r.id !== id));
     setActionId(null);
+    setOpenMenuId(null);
   }
 
   return (
@@ -181,37 +184,52 @@ export default function VendorProductsPage() {
                     <p className="text-sm text-gray-600 mt-1">{formatNaira(r.price)}</p>
                   </div>
 
-                  <details className="relative">
-                    <summary className="list-none cursor-pointer rounded-xl border px-3 py-2 text-sm">
+                  <div className="relative">
+                    <button
+                      type="button"
+                      className="list-none cursor-pointer rounded-xl border px-3 py-2 text-sm"
+                      onClick={() => setOpenMenuId((prev) => (prev === r.id ? null : r.id))}
+                    >
                       Options
-                    </summary>
-                    <div className="absolute right-0 z-10 mt-2 w-40 rounded-xl border bg-white p-2 shadow-sm">
-                      <Link
-                        href={`/vendor/products/${r.id}`}
-                        className="block rounded-lg px-3 py-2 text-sm hover:bg-gray-100"
-                      >
-                        Edit
-                      </Link>
-                      <button
-                        type="button"
-                        className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-100 disabled:opacity-50"
-                        onClick={() => deleteProduct(r.id)}
-                        disabled={actionId === r.id}
-                      >
-                        Delete
-                      </button>
-                      <button
-                        type="button"
-                        className={`mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100 disabled:opacity-50 ${
-                          available ? "text-gray-900" : "text-black font-medium"
-                        }`}
-                        onClick={() => toggleAvailable(r.id, !available)}
-                        disabled={actionId === r.id}
-                      >
-                        {actionId === r.id ? "Saving..." : available ? "Disable" : "Enable"}
-                      </button>
-                    </div>
-                  </details>
+                    </button>
+                    {openMenuId === r.id ? (
+                      <>
+                        <button
+                          type="button"
+                          className="fixed inset-0 z-10 cursor-default"
+                          aria-label="Close options"
+                          onClick={() => setOpenMenuId(null)}
+                        />
+                        <div className="absolute right-0 z-20 mt-2 w-40 rounded-xl border bg-white p-2 shadow-sm">
+                          <Link
+                            href={`/vendor/products/${r.id}`}
+                            className="block rounded-lg px-3 py-2 text-sm hover:bg-gray-100"
+                            onClick={() => setOpenMenuId(null)}
+                          >
+                            Edit
+                          </Link>
+                          <button
+                            type="button"
+                            className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-100 disabled:opacity-50"
+                            onClick={() => deleteProduct(r.id)}
+                            disabled={actionId === r.id}
+                          >
+                            Delete
+                          </button>
+                          <button
+                            type="button"
+                            className={`mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100 disabled:opacity-50 ${
+                              available ? "text-gray-900" : "text-black font-medium"
+                            }`}
+                            onClick={() => toggleAvailable(r.id, !available)}
+                            disabled={actionId === r.id}
+                          >
+                            {actionId === r.id ? "Saving..." : available ? "Disable" : "Enable"}
+                          </button>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
                 </div>
               );
             })}

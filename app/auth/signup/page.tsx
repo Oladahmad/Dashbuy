@@ -102,7 +102,7 @@ export default function UserSignupPage() {
       return;
     }
 
-    setMsg("Account created. Check your email to verify, then sign in.");
+    setMsg("Account created. Check your inbox or spam for verification email, then sign in.");
   }
 
   return (
@@ -163,7 +163,7 @@ export default function UserSignupPage() {
             {fieldErrors.password ? <p className="mt-1 text-xs text-red-600">{fieldErrors.password}</p> : null}
           </div>
 
-          {msg ? <p className={`text-sm ${msg.includes("Check your email") ? "text-green-700" : "text-red-600"}`}>{msg}</p> : null}
+          {msg ? <p className={`text-sm ${msg.includes("inbox or spam") ? "text-green-700" : "text-red-600"}`}>{msg}</p> : null}
 
           <button
             className="w-full rounded-xl bg-black px-4 py-3 text-white disabled:opacity-60"

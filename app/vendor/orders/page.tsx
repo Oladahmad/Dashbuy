@@ -22,6 +22,11 @@ type OrderRow = {
   created_at: string;
 };
 
+type OrderListMeta = {
+  summary: string;
+  buyerName: string;
+};
+
 function safeNumber(x: unknown, fallback = 0) {
   if (typeof x === "number" && Number.isFinite(x)) return x;
   if (typeof x === "string") {
@@ -34,14 +39,6 @@ function safeNumber(x: unknown, fallback = 0) {
 function formatNaira(n: number) {
   const v = Math.max(0, Math.floor(n));
   return "₦" + v.toLocaleString();
-}
-
-function formatDateTime(iso: string) {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
 }
 
 function computeGross(o: OrderRow) {
@@ -70,18 +67,15 @@ function isPaidStatus(status: string | null) {
   return !["pending_payment", "rejected", "declined", "cancelled", "refunded"].includes(s);
 }
 
-function labelForOrder(o: OrderRow) {
-  const fromNotes = extractOrderNameFromNotes(o.notes);
-  if (fromNotes) return fromNotes;
-  if (o.order_type === "product") return "Product Order";
-  if ((o.food_mode ?? "plate") === "combo") return "Food Combo Order";
-  return "Food Plate Order";
+function uniqueNames(names: string[]) {
+  return Array.from(new Set(names.map((x) => x.trim()).filter(Boolean)));
 }
 
-function typeForOrder(o: OrderRow) {
-  if (o.order_type === "product") return "Type: Products";
-  if ((o.food_mode ?? "plate") === "combo") return "Type: Food - Combo";
-  return "Type: Food - Plate";
+function summarizeItems(names: string[]) {
+  const unique = uniqueNames(names);
+  if (unique.length === 0) return "Order items";
+  if (unique.length <= 3) return unique.join(", ");
+  return `${unique.slice(0, 3).join(", ")} +${unique.length - 3} more`;
 }
 
 function friendlyStatus(status: string | null) {
@@ -113,6 +107,7 @@ export default function VendorOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [orderMeta, setOrderMeta] = useState<Record<string, OrderListMeta>>({});
   const [statusFilter, setStatusFilter] = useState<"all" | string>("all");
 
   useEffect(() => {
@@ -135,6 +130,7 @@ export default function VendorOrdersPage() {
       }
 
       const userId = session.user.id;
+      const accessToken = session.access_token ?? "";
 
       const { data, error } = await supabase
         .from("orders")
@@ -149,6 +145,7 @@ export default function VendorOrdersPage() {
       if (error) {
         setErr(error.message);
         setOrders([]);
+        setOrderMeta({});
       } else {
         const rows = (data ?? []) as OrderRow[];
         const orderIds = rows.map((r) => r.id);
@@ -169,6 +166,92 @@ export default function VendorOrdersPage() {
           }
         }
         setOrders(rows);
+
+        const metaMap: Record<string, OrderListMeta> = {};
+        const orderItemNames = new Map<string, string[]>();
+        const buyerNamesByOrderId = new Map<string, string>();
+
+        if (orderIds.length > 0) {
+          if (accessToken) {
+            try {
+              const buyersRes = await fetch("/api/vendor/recent-order-buyers", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${accessToken}`,
+                },
+                body: JSON.stringify({ orderIds }),
+              });
+              const buyersBody = (await buyersRes.json()) as {
+                ok?: boolean;
+                buyersByOrderId?: Record<string, string>;
+              };
+              if (buyersRes.ok && buyersBody.ok && buyersBody.buyersByOrderId) {
+                for (const [orderId, buyerName] of Object.entries(buyersBody.buyersByOrderId)) {
+                  const clean = String(buyerName ?? "").trim();
+                  if (clean) buyerNamesByOrderId.set(orderId, clean);
+                }
+              }
+            } catch {
+              // Keep page functional even if lookup fails.
+            }
+          }
+
+          const { data: productItems } = await supabase
+            .from("order_items")
+            .select("order_id,products:product_id(name)")
+            .in("order_id", orderIds);
+          for (const row of (productItems as Array<Record<string, unknown>> | null) ?? []) {
+            const orderId = String(row.order_id ?? "").trim();
+            const product = (row.products as { name?: string } | null) ?? null;
+            const name = String(product?.name ?? "").trim();
+            if (!orderId || !name) continue;
+            orderItemNames.set(orderId, [...(orderItemNames.get(orderId) ?? []), name]);
+          }
+
+          const { data: comboItems } = await supabase
+            .from("combo_order_items")
+            .select("order_id,food_items:combo_food_id(name)")
+            .in("order_id", orderIds);
+          for (const row of (comboItems as Array<Record<string, unknown>> | null) ?? []) {
+            const orderId = String(row.order_id ?? "").trim();
+            const food = (row.food_items as { name?: string } | null) ?? null;
+            const name = String(food?.name ?? "").trim();
+            if (!orderId || !name) continue;
+            orderItemNames.set(orderId, [...(orderItemNames.get(orderId) ?? []), name]);
+          }
+
+          const { data: plates } = await supabase.from("order_plates").select("id,order_id").in("order_id", orderIds);
+          const plateRows = (plates as Array<{ id: string; order_id: string }> | null) ?? [];
+          const plateIds = plateRows.map((p) => p.id).filter(Boolean);
+          const orderIdByPlateId = new Map(plateRows.map((p) => [p.id, p.order_id]));
+
+          if (plateIds.length > 0) {
+            const { data: plateItems } = await supabase
+              .from("order_plate_items")
+              .select("order_plate_id,food_items:food_item_id(name),food_item_variants:variant_id(name)")
+              .in("order_plate_id", plateIds);
+            for (const row of (plateItems as Array<Record<string, unknown>> | null) ?? []) {
+              const plateId = String(row.order_plate_id ?? "").trim();
+              const orderId = orderIdByPlateId.get(plateId) ?? "";
+              const food = (row.food_items as { name?: string } | null) ?? null;
+              const variant = (row.food_item_variants as { name?: string } | null) ?? null;
+              const base = String(food?.name ?? "").trim();
+              const variantName = String(variant?.name ?? "").trim();
+              const name = variantName ? `${base} ${variantName}` : base;
+              if (!orderId || !name) continue;
+              orderItemNames.set(orderId, [...(orderItemNames.get(orderId) ?? []), name]);
+            }
+          }
+        }
+
+        for (const order of rows) {
+          const summary = summarizeItems(orderItemNames.get(order.id) ?? []);
+          const buyerName = buyerNamesByOrderId.get(order.id) || "Buyer";
+          metaMap[order.id] = { summary, buyerName };
+        }
+
+        setOrderMeta(metaMap);
       }
 
       setLoading(false);
@@ -189,10 +272,6 @@ export default function VendorOrdersPage() {
   const payableOrders = useMemo(() => {
     return orders.filter((o) => !isPendingPaymentStatus(o.status));
   }, [orders]);
-
-  const unpaidCount = useMemo(() => {
-    return orders.length - payableOrders.length;
-  }, [orders.length, payableOrders.length]);
 
   const filtered = useMemo(() => {
     return payableOrders.filter((o) => {
@@ -259,9 +338,6 @@ export default function VendorOrdersPage() {
         <p className="mt-2 text-xs text-gray-600">
           Pending confirmation helps prevent scams until logistics confirms delivery.
         </p>
-        {unpaidCount > 0 ? (
-          <p className="mt-1 text-xs text-gray-600">{unpaidCount} order(s) still awaiting customer payment.</p>
-        ) : null}
       </div>
 
       {err ? <div className="rounded-2xl border bg-white p-4 text-sm text-red-600">{err}</div> : null}
@@ -275,7 +351,10 @@ export default function VendorOrdersPage() {
           <div className="space-y-2">
             {filtered.map((o) => {
               const gross = computeGross(o);
-              const netIfDelivered = isSettledStatus(o.status) ? computeVendorNet(gross) : 0;
+              const shownAmount = isSettledStatus(o.status) ? computeVendorNet(gross) : gross;
+              const meta = orderMeta[o.id];
+              const title = meta?.summary || extractOrderNameFromNotes(o.notes) || "Order items";
+              const buyer = meta?.buyerName || "Buyer";
 
               return (
                 <Link
@@ -285,24 +364,15 @@ export default function VendorOrdersPage() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-semibold truncate">{labelForOrder(o)}</p>
-                      <p className="text-xs text-gray-600 mt-1">
-                        {formatDateTime(o.created_at)} · {friendlyStatus(o.status)}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">{typeForOrder(o)}</p>
+                      <p className="font-semibold truncate">{title}</p>
+                      <p className="text-xs text-gray-600 mt-1">Buyer: {buyer}</p>
+                      <p className="mt-1 whitespace-nowrap text-xs text-gray-500">Status: {friendlyStatus(o.status)}</p>
                     </div>
 
                     <div className="text-right">
-                      <p className="font-semibold">
-                        {isSettledStatus(o.status) ? formatNaira(netIfDelivered) : "Pending confirmation"}
-                      </p>
-                      <p className="text-xs text-gray-600">{settlementStage(o.status)}</p>
+                      <p className="font-semibold">{formatNaira(shownAmount)}</p>
                     </div>
                   </div>
-
-                  {o.delivery_address ? (
-                    <p className="text-xs text-gray-600 mt-2 truncate">{o.delivery_address}</p>
-                  ) : null}
                 </Link>
               );
             })}
@@ -312,3 +382,4 @@ export default function VendorOrdersPage() {
     </div>
   );
 }
+

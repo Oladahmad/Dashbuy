@@ -70,9 +70,6 @@ export default function VendorNewFoodPage() {
   const [unitPrice, setUnitPrice] = useState("");
   const [fixedPrice, setFixedPrice] = useState("");
 
-  const [minQty, setMinQty] = useState("1");
-  const [maxQty, setMaxQty] = useState("");
-
   const [stockQty, setStockQty] = useState("");
   const [isAvailable, setIsAvailable] = useState(true);
 
@@ -86,6 +83,13 @@ export default function VendorNewFoodPage() {
   const [plateFee, setPlateFee] = useState("");
   const [plateSaving, setPlateSaving] = useState(false);
   const [plateMsg, setPlateMsg] = useState<string | null>(null);
+
+  function explainPlateError(message: string) {
+    if (message.includes("plate_templates.vendor_id")) {
+      return "Database update needed: add vendor_id column to plate_templates first.";
+    }
+    return message;
+  }
 
   const showSingleFields = foodType === "single";
   const showComboFields = foodType === "combo";
@@ -140,14 +144,22 @@ export default function VendorNewFoodPage() {
 
   useEffect(() => {
     (async () => {
+      const { data: u } = await supabase.auth.getUser();
+      const vendorId = u.user?.id;
+      if (!vendorId) {
+        setPlateMsg("Please login first.");
+        return;
+      }
+
       const { data, error } = await supabase
         .from("plate_templates")
         .select("id,name,plate_fee,is_active")
+        .eq("vendor_id", vendorId)
         .eq("is_active", true)
         .order("plate_fee", { ascending: true });
 
       if (error) {
-        setPlateMsg("Could not load plates: " + error.message);
+        setPlateMsg("Could not load plates: " + explainPlateError(error.message));
         return;
       }
 
@@ -171,7 +183,17 @@ export default function VendorNewFoodPage() {
     }
 
     setPlateSaving(true);
+
+    const { data: u } = await supabase.auth.getUser();
+    const vendorId = u.user?.id;
+    if (!vendorId) {
+      setPlateSaving(false);
+      setPlateMsg("Please login first.");
+      return;
+    }
+
     const { error } = await supabase.from("plate_templates").insert({
+      vendor_id: vendorId,
       name: n,
       plate_fee: fee,
       is_active: true,
@@ -179,13 +201,14 @@ export default function VendorNewFoodPage() {
 
     if (error) {
       setPlateSaving(false);
-      setPlateMsg("Plate error: " + error.message);
+      setPlateMsg("Plate error: " + explainPlateError(error.message));
       return;
     }
 
     const { data } = await supabase
       .from("plate_templates")
       .select("id,name,plate_fee,is_active")
+      .eq("vendor_id", vendorId)
       .eq("is_active", true)
       .order("plate_fee", { ascending: true });
 
@@ -279,8 +302,6 @@ export default function VendorNewFoodPage() {
       return;
     }
 
-    const minq = toIntOrNull(minQty) ?? 0;
-    const maxq = toIntOrNull(maxQty);
     const sq = toIntOrNull(stockQty);
 
     const fixed = toNumberOrNull(fixedPrice);
@@ -298,10 +319,10 @@ export default function VendorNewFoodPage() {
       pricing_type: showSingleFields ? pricingType : "fixed",
       unit_label: clean(unitLabel) ? clean(unitLabel) : (recommendedUnitLabel || null),
 
-      min_qty: showSingleFields ? minq : 0,
-      max_qty: showSingleFields ? (maxq ?? null) : null,
+      min_qty: showSingleFields ? 1 : 0,
+      max_qty: null,
 
-      stock_qty: showComboFields ? (sq ?? 0) : (sq ?? null),
+      stock_qty: showComboFields ? (sq ?? 0) : null,
     };
 
     if (showFixedPricing) {
@@ -364,23 +385,15 @@ export default function VendorNewFoodPage() {
   function setSmartDefaultsForSingle(nextPricing: PricingType) {
     if (nextPricing === "per_scoop") {
       setUnitLabel("Scoop");
-      setMinQty("1");
-      setMaxQty("");
     }
     if (nextPricing === "per_unit") {
       setUnitLabel("Piece");
-      setMinQty("1");
-      setMaxQty("");
     }
     if (nextPricing === "fixed") {
       setUnitLabel("Portion");
-      setMinQty("1");
-      setMaxQty("");
     }
     if (nextPricing === "variant") {
       setUnitLabel("Option");
-      setMinQty("1");
-      setMaxQty("");
     }
   }
 
@@ -508,27 +521,68 @@ export default function VendorNewFoodPage() {
         </div>
 
         <div>
-          <label className="text-sm text-gray-700">Short description</label>
-          <textarea
-            className="mt-1 w-full rounded-xl border px-3 py-3"
-            placeholder="Eg spicy party jollof, fresh and hot"
-            value={shortDescription}
-            onChange={(e) => setShortDescription(e.target.value)}
-            rows={3}
-            disabled={saving}
-          />
+          <label className="text-sm text-gray-700">Image</label>
+          <div className="mt-2 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-3">
+            <p className="text-sm font-medium text-gray-800">Add food image</p>
+            <p className="mt-1 text-xs text-gray-600">Use a clear photo so customers can see exactly what they will get.</p>
+            <input
+              className="mt-3 w-full rounded-xl border bg-white px-3 py-3 text-sm"
+              type="file"
+              accept="image/*"
+              onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
+              disabled={saving}
+            />
+            {imageFile ? <p className="mt-2 text-xs text-gray-700">Selected: {imageFile.name}</p> : null}
+          </div>
         </div>
 
-        <div>
-          <label className="text-sm text-gray-700">Image</label>
-          <input
-            className="mt-2 w-full rounded-xl border px-3 py-3"
-            type="file"
-            accept="image/*"
-            onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
-            disabled={saving}
-          />
-        </div>
+        {showSingleFields ? (
+          <div className="rounded-xl border border-black/20 bg-black/[0.03] p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-800">
+              Recommended
+            </p>
+            <p className="mt-1 text-sm font-medium text-gray-900">
+              Please read this before listing single foods.
+            </p>
+            <details className="mt-3 rounded-lg border bg-white p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-gray-900">
+                Single food listing details
+              </summary>
+              <div className="mt-3 space-y-2 text-xs text-gray-700">
+                <p>
+                  <strong>Per scoop:</strong> Price for each scoop.
+                  Examples: jollof rice, fried rice.
+                </p>
+                <p>
+                  <strong>Per unit:</strong> Price for each piece/unit.
+                  Examples: chicken piece, boiled egg.
+                </p>
+                <p>
+                  <strong>Variant:</strong> One food with different options and prices.
+                  Examples: turkey (small/medium/big), fish (small/big).
+                </p>
+                <p>
+                  <strong>Fixed:</strong> One serving at one fixed price.
+                  Examples: amala pack, noodles pack.
+                </p>
+              </div>
+            </details>
+          </div>
+        ) : null}
+
+        {showComboFields ? (
+          <div>
+            <label className="text-sm text-gray-700">Details</label>
+            <textarea
+              className="mt-1 w-full rounded-xl border px-3 py-3"
+              placeholder="Add useful details for this combo."
+              value={shortDescription}
+              onChange={(e) => setShortDescription(e.target.value)}
+              rows={3}
+              disabled={saving}
+            />
+          </div>
+        ) : null}
 
         {showSingleFields ? (
           <>
@@ -715,75 +769,33 @@ export default function VendorNewFoodPage() {
               </div>
             ) : null}
 
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-sm text-gray-700">Min qty</label>
-                <input
-                  className="mt-1 w-full rounded-xl border px-3 py-3"
-                  placeholder="Eg 1"
-                  value={minQty}
-                  onChange={(e) => setMinQty(e.target.value)}
-                  inputMode="numeric"
-                  disabled={saving}
-                />
-              </div>
-
-              <div>
-                <label className="text-sm text-gray-700">Max qty</label>
-                <input
-                  className="mt-1 w-full rounded-xl border px-3 py-3"
-                  placeholder="Optional"
-                  value={maxQty}
-                  onChange={(e) => setMaxQty(e.target.value)}
-                  inputMode="numeric"
-                  disabled={saving}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-sm text-gray-700">Stock qty</label>
-              <input
-                className="mt-1 w-full rounded-xl border px-3 py-3"
-                placeholder="Optional"
-                value={stockQty}
-                onChange={(e) => setStockQty(e.target.value)}
-                inputMode="numeric"
-                disabled={saving}
-              />
-              <p className="mt-2 text-xs text-gray-600">
-                For single foods, you can leave it empty if you do not track stock strictly.
-              </p>
-            </div>
           </>
         ) : null}
 
         {showComboFields ? (
           <>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-sm text-gray-700">Combo price</label>
-                <input
-                  className="mt-1 w-full rounded-xl border px-3 py-3"
-                  placeholder="Eg 2500"
-                  value={fixedPrice}
-                  onChange={(e) => setFixedPrice(e.target.value)}
-                  inputMode="numeric"
-                  disabled={saving}
-                />
-              </div>
-
-              <div>
-                <label className="text-sm text-gray-700">Stock qty</label>
-                <input
-                  className="mt-1 w-full rounded-xl border px-3 py-3"
-                  placeholder="Eg 10"
-                  value={stockQty}
-                  onChange={(e) => setStockQty(e.target.value)}
-                  inputMode="numeric"
-                  disabled={saving}
-                />
-              </div>
+            <div>
+              <label className="text-sm text-gray-700">Combo price</label>
+              <input
+                className="mt-1 w-full rounded-xl border px-3 py-3"
+                placeholder="Eg 2500"
+                value={fixedPrice}
+                onChange={(e) => setFixedPrice(e.target.value)}
+                inputMode="numeric"
+                disabled={saving}
+              />
+            </div>
+            <div>
+              <label className="text-sm text-gray-700">Stock qty</label>
+              <input
+                className="mt-1 w-full rounded-xl border px-3 py-3"
+                placeholder="How many combo packs are available now? e.g 10"
+                value={stockQty}
+                onChange={(e) => setStockQty(e.target.value)}
+                inputMode="numeric"
+                disabled={saving}
+              />
+              <p className="mt-2 text-xs text-gray-600">This is the number of combo packs you can still sell.</p>
             </div>
           </>
         ) : null}

@@ -73,6 +73,7 @@ export default function VendorFoodPage() {
 
   const [items, setItems] = useState<FoodItemRow[]>([]);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<FoodItemRow | null>(null);
@@ -83,6 +84,7 @@ export default function VendorFoodPage() {
   const [variantSaving, setVariantSaving] = useState(false);
   const [variantBusyId, setVariantBusyId] = useState<string | null>(null);
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
+  const [openVariantMenuId, setOpenVariantMenuId] = useState<string | null>(null);
   const [editVariantName, setEditVariantName] = useState("");
   const [editVariantPrice, setEditVariantPrice] = useState("");
 
@@ -199,6 +201,26 @@ export default function VendorFoodPage() {
     );
 
     setTogglingId(null);
+    setOpenMenuId(null);
+  }
+
+  async function deleteFoodFromList(it: FoodItemRow) {
+    const yes = window.confirm("Delete this food item?");
+    if (!yes) return;
+
+    setMsg(null);
+    setTogglingId(it.id);
+
+    const { error } = await supabase.from("food_items").delete().eq("id", it.id);
+    if (error) {
+      setTogglingId(null);
+      setMsg("Delete food failed: " + error.message);
+      return;
+    }
+
+    setItems((prev) => prev.filter((x) => x.id !== it.id));
+    setTogglingId(null);
+    setOpenMenuId(null);
   }
 
   async function openDetails(it: FoodItemRow) {
@@ -265,6 +287,8 @@ export default function VendorFoodPage() {
     setVariantSaving(false);
     setItemSaving(false);
     setItemDeleting(false);
+    setOpenMenuId(null);
+    setOpenVariantMenuId(null);
   }
 
   async function addVariant() {
@@ -337,6 +361,7 @@ export default function VendorFoodPage() {
       prev.map((x) => (x.id === v.id ? { ...x, is_available: next } : x))
     );
     setVariantBusyId(null);
+    setOpenVariantMenuId(null);
   }
 
   function beginEditVariant(v: VariantRow) {
@@ -344,12 +369,14 @@ export default function VendorFoodPage() {
     setEditVariantName(v.name);
     setEditVariantPrice(String(v.price));
     setDetailsMsg(null);
+    setOpenVariantMenuId(null);
   }
 
   function cancelEditVariant() {
     setEditingVariantId(null);
     setEditVariantName("");
     setEditVariantPrice("");
+    setOpenVariantMenuId(null);
   }
 
   async function saveVariantEdit(variantId: string) {
@@ -383,6 +410,7 @@ export default function VendorFoodPage() {
     setEditingVariantId(null);
     setEditVariantName("");
     setEditVariantPrice("");
+    setOpenVariantMenuId(null);
     setDetailsMsg("Variant updated.");
   }
 
@@ -397,6 +425,7 @@ export default function VendorFoodPage() {
     setVariants((prev) => prev.filter((x) => x.id !== variantId));
     if (editingVariantId === variantId) cancelEditVariant();
     setVariantBusyId(null);
+    setOpenVariantMenuId(null);
     setDetailsMsg("Variant deleted.");
   }
 
@@ -521,50 +550,81 @@ export default function VendorFoodPage() {
             {combos.length === 0 ? (
               <p className="mt-3 text-sm text-gray-600">No combo uploaded yet.</p>
             ) : (
-              <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="mt-4 space-y-2">
                 {combos.map((it) => (
-                  <div key={it.id} className="rounded-2xl border bg-white overflow-hidden">
-                    <button
-                      type="button"
-                      className="w-full text-left"
-                      onClick={() => openDetails(it)}
-                    >
-                      <div className="aspect-square w-full bg-gray-100">
-                        {it.image_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={it.image_url}
-                            alt={it.name}
-                            className="h-full w-full object-cover"
-                          />
-                        ) : null}
-                      </div>
+                  <div key={it.id} className="rounded-2xl border bg-white p-3 flex gap-3">
+                    <div className="h-14 w-14 rounded-xl bg-gray-100 overflow-hidden shrink-0">
+                      {it.image_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={it.image_url}
+                          alt={it.name}
+                          className="h-14 w-14 object-cover"
+                        />
+                      ) : null}
+                    </div>
 
-                      <div className="p-3">
-                        <p className="text-sm font-semibold line-clamp-1">{it.name}</p>
-                        <p className="mt-1 text-xs text-gray-600 line-clamp-1">
-                          {priceLabel(it)}
-                        </p>
-
-                        <p className="mt-2 text-xs text-gray-500">
-                          {it.is_available ?? true ? "Available" : "Disabled"}
-                        </p>
-                      </div>
-                    </button>
-
-                    <div className="p-3 pt-0">
+                    <div className="min-w-0 flex-1">
                       <button
                         type="button"
-                        className="w-full rounded-xl border px-3 py-2 text-sm"
-                        onClick={() => toggleAvailable(it)}
-                        disabled={togglingId === it.id}
+                        className="block w-full truncate text-left font-semibold"
+                        onClick={() => openDetails(it)}
                       >
-                        {togglingId === it.id
-                          ? "Updating..."
-                          : it.is_available ?? true
-                          ? "Disable"
-                          : "Enable"}
+                        {it.name}
                       </button>
+                      <p className="mt-1 text-sm text-gray-600">{priceLabel(it)}</p>
+                    </div>
+
+                    <div className="relative">
+                      <button
+                        type="button"
+                        className="rounded-xl border px-3 py-2 text-sm"
+                        onClick={() => setOpenMenuId((prev) => (prev === it.id ? null : it.id))}
+                      >
+                        Options
+                      </button>
+                      {openMenuId === it.id ? (
+                        <>
+                          <button
+                            type="button"
+                            className="fixed inset-0 z-10 cursor-default"
+                            aria-label="Close options"
+                            onClick={() => setOpenMenuId(null)}
+                          />
+                          <div className="absolute right-0 z-20 mt-2 w-40 rounded-xl border bg-white p-2 shadow-sm">
+                            <button
+                              type="button"
+                              className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                openDetails(it);
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-100 disabled:opacity-50"
+                              onClick={() => deleteFoodFromList(it)}
+                              disabled={togglingId === it.id}
+                            >
+                              Delete
+                            </button>
+                            <button
+                              type="button"
+                              className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100 disabled:opacity-50"
+                              onClick={() => toggleAvailable(it)}
+                              disabled={togglingId === it.id}
+                            >
+                              {togglingId === it.id
+                                ? "Updating..."
+                                : it.is_available ?? true
+                                ? "Disable"
+                                : "Enable"}
+                            </button>
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 ))}
@@ -581,50 +641,81 @@ export default function VendorFoodPage() {
             {singles.length === 0 ? (
               <p className="mt-3 text-sm text-gray-600">No single food uploaded yet.</p>
             ) : (
-              <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="mt-4 space-y-2">
                 {singles.map((it) => (
-                  <div key={it.id} className="rounded-2xl border bg-white overflow-hidden">
-                    <button
-                      type="button"
-                      className="w-full text-left"
-                      onClick={() => openDetails(it)}
-                    >
-                      <div className="aspect-square w-full bg-gray-100">
-                        {it.image_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={it.image_url}
-                            alt={it.name}
-                            className="h-full w-full object-cover"
-                          />
-                        ) : null}
-                      </div>
+                  <div key={it.id} className="rounded-2xl border bg-white p-3 flex gap-3">
+                    <div className="h-14 w-14 rounded-xl bg-gray-100 overflow-hidden shrink-0">
+                      {it.image_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={it.image_url}
+                          alt={it.name}
+                          className="h-14 w-14 object-cover"
+                        />
+                      ) : null}
+                    </div>
 
-                      <div className="p-3">
-                        <p className="text-sm font-semibold line-clamp-1">{it.name}</p>
-                        <p className="mt-1 text-xs text-gray-600 line-clamp-1">
-                          {priceLabel(it)}
-                        </p>
-
-                        <p className="mt-2 text-xs text-gray-500">
-                          {it.is_available ?? true ? "Available" : "Disabled"}
-                        </p>
-                      </div>
-                    </button>
-
-                    <div className="p-3 pt-0">
+                    <div className="min-w-0 flex-1">
                       <button
                         type="button"
-                        className="w-full rounded-xl border px-3 py-2 text-sm"
-                        onClick={() => toggleAvailable(it)}
-                        disabled={togglingId === it.id}
+                        className="block w-full truncate text-left font-semibold"
+                        onClick={() => openDetails(it)}
                       >
-                        {togglingId === it.id
-                          ? "Updating..."
-                          : it.is_available ?? true
-                          ? "Disable"
-                          : "Enable"}
+                        {it.name}
                       </button>
+                      <p className="mt-1 text-sm text-gray-600">{priceLabel(it)}</p>
+                    </div>
+
+                    <div className="relative">
+                      <button
+                        type="button"
+                        className="rounded-xl border px-3 py-2 text-sm"
+                        onClick={() => setOpenMenuId((prev) => (prev === it.id ? null : it.id))}
+                      >
+                        Options
+                      </button>
+                      {openMenuId === it.id ? (
+                        <>
+                          <button
+                            type="button"
+                            className="fixed inset-0 z-10 cursor-default"
+                            aria-label="Close options"
+                            onClick={() => setOpenMenuId(null)}
+                          />
+                          <div className="absolute right-0 z-20 mt-2 w-40 rounded-xl border bg-white p-2 shadow-sm">
+                            <button
+                              type="button"
+                              className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                openDetails(it);
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-100 disabled:opacity-50"
+                              onClick={() => deleteFoodFromList(it)}
+                              disabled={togglingId === it.id}
+                            >
+                              Delete
+                            </button>
+                            <button
+                              type="button"
+                              className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100 disabled:opacity-50"
+                              onClick={() => toggleAvailable(it)}
+                              disabled={togglingId === it.id}
+                            >
+                              {togglingId === it.id
+                                ? "Updating..."
+                                : it.is_available ?? true
+                                ? "Disable"
+                                : "Enable"}
+                            </button>
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 ))}
@@ -880,7 +971,7 @@ export default function VendorFoodPage() {
                   ) : (
                     <div className="mt-3 grid gap-2">
                       {variants.map((v) => (
-                        <div key={v.id} className="rounded-xl border p-3 flex items-center justify-between gap-3">
+                        <div key={v.id} className="rounded-lg border px-3 py-2.5 flex items-center justify-between gap-2">
                           {editingVariantId === v.id ? (
                             <div className="w-full space-y-2">
                               <input
@@ -929,31 +1020,53 @@ export default function VendorFoodPage() {
                                 <p className="text-sm font-medium truncate">{v.name}</p>
                                 <p className="text-xs text-gray-600">{naira(v.price)}</p>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="relative">
                                 <button
                                   type="button"
                                   className="rounded-lg border px-3 py-1 text-sm"
-                                  onClick={() => beginEditVariant(v)}
+                                  onClick={() =>
+                                    setOpenVariantMenuId((prev) => (prev === v.id ? null : v.id))
+                                  }
                                   disabled={variantBusyId === v.id}
                                 >
-                                  Edit
+                                  Options
                                 </button>
-                                <button
-                                  type="button"
-                                  className="rounded-lg border px-3 py-1 text-sm"
-                                  onClick={() => toggleVariant(v)}
-                                  disabled={variantBusyId === v.id}
-                                >
-                                  {v.is_available ? "Disable" : "Enable"}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="rounded-lg border px-3 py-1 text-sm"
-                                  onClick={() => deleteVariant(v.id)}
-                                  disabled={variantBusyId === v.id}
-                                >
-                                  Delete
-                                </button>
+                                {openVariantMenuId === v.id ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      aria-label="Close variant options"
+                                      className="fixed inset-0 z-10"
+                                      onClick={() => setOpenVariantMenuId(null)}
+                                    />
+                                    <div className="absolute right-0 top-9 z-20 min-w-[140px] rounded-xl border bg-white p-1 shadow-lg">
+                                      <button
+                                        type="button"
+                                        className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100"
+                                        onClick={() => beginEditVariant(v)}
+                                        disabled={variantBusyId === v.id}
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100"
+                                        onClick={() => toggleVariant(v)}
+                                        disabled={variantBusyId === v.id}
+                                      >
+                                        {v.is_available ? "Disable" : "Enable"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-100"
+                                        onClick={() => deleteVariant(v.id)}
+                                        disabled={variantBusyId === v.id}
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : null}
                               </div>
                             </>
                           )}
