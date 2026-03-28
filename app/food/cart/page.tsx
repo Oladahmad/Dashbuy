@@ -167,6 +167,13 @@ export default function FoodCartPage() {
     localStorage.removeItem(LEGACY_COMBO_CART_KEY);
   }
 
+  function editPlate(p: CartPlate) {
+    if (p.plateTemplateId === "__custom_request__") return;
+    const plateId = encodeURIComponent(p.plateTemplateId);
+    const editAt = encodeURIComponent(p.createdAt);
+    router.push(`/food/vendors/${p.vendorId}/build-plate?plateId=${plateId}&editAt=${editAt}`);
+  }
+
   const isEmpty = plates.length === 0 && combos.length === 0;
 
   return (
@@ -215,13 +222,24 @@ export default function FoodCartPage() {
                           Plate total: <strong>{formatNaira(Number(p.plateTotal))}</strong>
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        className="rounded-lg border px-3 py-1.5 text-sm"
-                        onClick={() => removePlate(idx)}
-                      >
-                        Remove
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {p.plateTemplateId !== "__custom_request__" ? (
+                          <button
+                            type="button"
+                            className="rounded-lg border px-3 py-1.5 text-sm"
+                            onClick={() => editPlate(p)}
+                          >
+                            Edit
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="rounded-lg border px-3 py-1.5 text-sm"
+                          onClick={() => removePlate(idx)}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                     {p.plateTemplateId === "__custom_request__" ? (
                       <div className="mt-3 rounded-lg border bg-gray-50 p-3">

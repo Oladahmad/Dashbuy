@@ -8,6 +8,7 @@ type Vendor = {
   store_name: string | null;
   full_name: string | null;
 };
+
 type Plate = { id: string; name: string; plate_fee: number };
 
 type FoodItem = {
@@ -48,11 +49,10 @@ type CartPlate = {
   plateName: string;
   plateFee: number;
   plateTotal: number;
-  // We store breakdown for vendor/order creation later,
-  // but we won't show it on checkout (plates-only UI).
   lines: PlateLine[];
   createdAt: string;
 };
+
 type ComboCartItem = {
   comboId: string;
   name: string;
@@ -79,7 +79,7 @@ function vendorDisplayName(v: Vendor | null) {
 }
 
 function formatNaira(n: number) {
-  return `₦${Math.round(n).toLocaleString()}`;
+  return `N${Math.round(n).toLocaleString()}`;
 }
 
 function itemUnitPrice(it: FoodItem) {
@@ -94,7 +94,7 @@ function readCart(): FoodCart {
   try {
     const raw = localStorage.getItem(CART_KEY);
     if (!raw) return { vendorId: null, plates: [], combos: [] };
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Partial<FoodCart>;
     const plates = Array.isArray(parsed.plates) ? parsed.plates : [];
     const combos = Array.isArray(parsed.combos) ? parsed.combos : [];
     return {
@@ -122,15 +122,15 @@ function BuildPlatePageInner() {
   const router = useRouter();
 
   const plateId = searchParams.get("plateId");
+  const editAt = searchParams.get("editAt");
 
   const [vendor, setVendor] = useState<Vendor | null>(null);
   const [plate, setPlate] = useState<Plate | null>(null);
   const [items, setItems] = useState<FoodItem[]>([]);
   const [variants, setVariants] = useState<Variant[]>([]);
   const [msg, setMsg] = useState("Loading...");
+  const [editingPlateAt, setEditingPlateAt] = useState<string | null>(null);
 
-  // selection state:
-  // key = foodItemId, value = { qty, variantId? }
   const [qtyById, setQtyById] = useState<Record<string, number>>({});
   const [variantById, setVariantById] = useState<Record<string, string>>({});
 
@@ -181,7 +181,6 @@ function BuildPlatePageInner() {
       }
       setPlate(selectedPlate);
 
-      // default select cheapest variant for each variant item
       const byFood: Record<string, Variant[]> = {};
       for (const v of loadedVariants) {
         if (!byFood[v.food_item_id]) byFood[v.food_item_id] = [];
@@ -191,11 +190,43 @@ function BuildPlatePageInner() {
       for (const fid of Object.keys(byFood)) {
         defaults[fid] = byFood[fid][0]?.id;
       }
-      setVariantById(defaults);
+
+      if (editAt) {
+        const existing = readCart();
+        const target = existing.plates.find(
+          (p) =>
+            p.createdAt === editAt &&
+            p.vendorId === vendorId &&
+            p.plateTemplateId === selectedPlate.id,
+        );
+
+        if (target) {
+          const nextQty: Record<string, number> = {};
+          const nextVariant: Record<string, string> = { ...defaults };
+
+          for (const line of target.lines) {
+            if (!line.foodItemId) continue;
+            nextQty[line.foodItemId] = Number(line.qty) || 0;
+            if (line.variantId) nextVariant[line.foodItemId] = line.variantId;
+          }
+
+          setQtyById(nextQty);
+          setVariantById(nextVariant);
+          setEditingPlateAt(target.createdAt);
+        } else {
+          setQtyById({});
+          setVariantById(defaults);
+          setEditingPlateAt(null);
+        }
+      } else {
+        setQtyById({});
+        setVariantById(defaults);
+        setEditingPlateAt(null);
+      }
 
       setMsg("");
     })();
-  }, [vendorId, plateId]);
+  }, [vendorId, plateId, editAt, router]);
 
   const variantsByFoodId = useMemo(() => {
     const map: Record<string, Variant[]> = {};
@@ -226,7 +257,7 @@ function BuildPlatePageInner() {
         const selectedVariantId = variantById[it.id];
         const options = variantsByFoodId[it.id] ?? [];
         const selected = options.find((x) => x.id === selectedVariantId) ?? options[0];
-        if (!selected) continue; // no available variants
+        if (!selected) continue;
 
         res.push({
           foodItemId: it.id,
@@ -284,12 +315,16 @@ function BuildPlatePageInner() {
       plateFee,
       plateTotal,
       lines,
-      createdAt: new Date().toISOString(),
+      createdAt: editingPlateAt ?? new Date().toISOString(),
     };
+
+    const nextPlates = editingPlateAt
+      ? existing.plates.map((p) => (p.createdAt === editingPlateAt ? newPlate : p))
+      : [...existing.plates, newPlate];
 
     writeCart({
       vendorId: existing.vendorId ?? vendor.id,
-      plates: [...existing.plates, newPlate],
+      plates: nextPlates,
       combos: existing.combos,
     });
 
@@ -299,30 +334,41 @@ function BuildPlatePageInner() {
   if (msg) return <main className="p-6">{msg}</main>;
 
   return (
-    <main className="p-6 max-w-4xl">
-      <button className="text-sm underline" onClick={() => router.back()}>
-        ← Back
+    <main className="mx-auto max-w-4xl space-y-4 p-4">
+      <button
+        type="button"
+        className="rounded-xl border px-3 py-2 text-sm"
+        onClick={() => router.back()}
+      >
+        Back
       </button>
 
-          <h1 className="mt-3 text-xl font-bold sm:text-2xl">
-        Build Plate — {vendorDisplayName(vendor)}
-      </h1>
+      <section className="rounded-2xl border bg-white p-4">
+        <h1 className="text-xl font-bold sm:text-2xl">Build Plate</h1>
+        <p className="mt-1 text-sm text-gray-600">{vendorDisplayName(vendor)}</p>
+      </section>
 
-      <div className="mt-3 rounded border p-4">
-        <p className="font-semibold">{plate?.name}</p>
-        <p className="text-sm text-gray-600">
-          Plate fee: {formatNaira(plateFee)}
-        </p>
-        <p className="mt-2 text-sm">
-          Items total: <strong>{formatNaira(itemsTotal)}</strong> • Plate total:{" "}
-          <strong>{formatNaira(plateTotal)}</strong>
-        </p>
-      </div>
+      <section className="rounded-2xl border bg-white p-4">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="rounded-xl border p-3">
+            <p className="text-xs text-gray-600">Selected plate</p>
+            <p className="mt-1 font-semibold">{plate?.name}</p>
+            <p className="mt-1 text-sm text-gray-600">Fee: {formatNaira(plateFee)}</p>
+          </div>
+          <div className="rounded-xl border p-3">
+            <p className="text-xs text-gray-600">Items total</p>
+            <p className="mt-1 font-semibold">{formatNaira(itemsTotal)}</p>
+          </div>
+        </div>
+      </section>
 
-      <div className="mt-6 grid gap-6">
+      <div className="grid gap-4">
         {Object.entries(itemsByCategory).map(([cat, catItems]) => (
-          <section key={cat} className="rounded border p-4">
-            <h2 className="font-semibold capitalize">{cat}</h2>
+          <section key={cat} className="rounded-2xl border bg-white p-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold capitalize">{cat}</h2>
+              <p className="text-xs text-gray-500">{catItems.length} items</p>
+            </div>
 
             <div className="mt-3 grid gap-3">
               {catItems.map((it) => {
@@ -330,30 +376,29 @@ function BuildPlatePageInner() {
                 const isVariant = it.pricing_type === "variant";
                 const vOptions = variantsByFoodId[it.id] ?? [];
                 const selectedVariantId = variantById[it.id] ?? (vOptions[0]?.id ?? "");
-                const selectedVariant =
-                  vOptions.find((x) => x.id === selectedVariantId) ?? vOptions[0];
+                const selectedVariant = vOptions.find((x) => x.id === selectedVariantId) ?? vOptions[0];
 
                 const displayPrice =
                   it.pricing_type === "variant"
                     ? selectedVariant
-                      ? `${selectedVariant.name} • ${formatNaira(Number(selectedVariant.price))}`
+                      ? `${selectedVariant.name} - ${formatNaira(Number(selectedVariant.price))}`
                       : "No variants available"
                     : `${formatNaira(itemUnitPrice(it))}${it.unit_label ? ` / ${it.unit_label}` : ""}`;
 
                 return (
-                  <div key={it.id} className="rounded border p-3">
+                  <div key={it.id} className="rounded-xl border p-3">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
+                      <div className="min-w-0">
                         <p className="font-semibold">{it.name}</p>
-                        <p className="text-sm text-gray-600">
-                          {it.pricing_type} • {displayPrice}
+                        <p className="mt-1 text-sm text-gray-600">
+                          {it.pricing_type} - {displayPrice}
                         </p>
 
-                        {isVariant && (
+                        {isVariant ? (
                           <div className="mt-2">
                             <label className="text-xs text-gray-600">Select option</label>
                             <select
-                              className="mt-1 w-full rounded border p-2"
+                              className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
                               value={selectedVariantId}
                               onChange={(e) =>
                                 setVariantById((prev) => ({
@@ -368,25 +413,27 @@ function BuildPlatePageInner() {
                               ) : (
                                 vOptions.map((v) => (
                                   <option key={v.id} value={v.id}>
-                                    {v.name} — {formatNaira(Number(v.price))}
+                                    {v.name} - {formatNaira(Number(v.price))}
                                   </option>
                                 ))
                               )}
                             </select>
                           </div>
-                        )}
+                        ) : null}
                       </div>
 
                       <div className="flex items-center gap-2">
                         <button
-                          className="rounded border px-3 py-1"
+                          type="button"
+                          className="rounded-lg border px-3 py-1"
                           onClick={() => setQty(it.id, qty - 1)}
                         >
                           -
                         </button>
                         <span className="w-8 text-center">{qty}</span>
                         <button
-                          className="rounded border px-3 py-1"
+                          type="button"
+                          className="rounded-lg border px-3 py-1"
                           onClick={() => setQty(it.id, qty + 1)}
                           disabled={isVariant && vOptions.length === 0}
                         >
@@ -395,19 +442,11 @@ function BuildPlatePageInner() {
                       </div>
                     </div>
 
-                    {qty > 0 && (
+                    {qty > 0 ? (
                       <p className="mt-2 text-sm">
-                        Line total:{" "}
-                        <strong>
-                          {formatNaira(
-                            qty *
-                              (it.pricing_type === "variant"
-                                ? Number(selectedVariant?.price ?? 0)
-                                : itemUnitPrice(it))
-                          )}
-                        </strong>
+                        Line total: <strong>{formatNaira(qty * (it.pricing_type === "variant" ? Number(selectedVariant?.price ?? 0) : itemUnitPrice(it)))}</strong>
                       </p>
-                    )}
+                    ) : null}
                   </div>
                 );
               })}
@@ -416,19 +455,22 @@ function BuildPlatePageInner() {
         ))}
       </div>
 
-      <div className="mt-6 flex items-center justify-between rounded border p-4">
-        <div>
-          <p className="text-sm text-gray-600">Plate total</p>
-          <p className="text-xl font-bold">{formatNaira(plateTotal)}</p>
-        </div>
+      <section className="rounded-2xl border bg-white p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-gray-600">Plate total</p>
+            <p className="text-xl font-bold">{formatNaira(plateTotal)}</p>
+          </div>
 
-        <button
-          className="rounded bg-black px-4 py-2 text-white"
-          onClick={addToCart}
-        >
-          Add plate to cart
-        </button>
-      </div>
+          <button
+            type="button"
+            className="rounded-xl bg-black px-4 py-3 text-sm text-white"
+            onClick={addToCart}
+          >
+            {editingPlateAt ? "Update plate in cart" : "Add plate to cart"}
+          </button>
+        </div>
+      </section>
     </main>
   );
 }
