@@ -119,6 +119,7 @@ export default function AppShell({ title, children }: AppShellProps) {
     { href: "/", label: "Home" },
     { href: "/food", label: "Food" },
     { href: "/products", label: "Products" },
+    { href: "/errand", label: "Errand" },
     { href: "/account", label: "Account" },
   ];
 
@@ -165,7 +166,7 @@ export default function AppShell({ title, children }: AppShellProps) {
       <main className="mx-auto max-w-xl px-4 py-4 pb-24">{children}</main>
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t">
-        <div className="mx-auto max-w-xl px-4 py-2 grid grid-cols-4 gap-2">
+        <div className="mx-auto max-w-xl px-4 py-2 grid grid-cols-5 gap-2">
           {nav.map((n) => (
             <Link
               key={n.href}
