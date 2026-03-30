@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
 import { extractOrderNameFromNotes, fallbackFoodOrderName } from "@/lib/orderName";
+import { parseErrandQuote } from "@/lib/errandQuote";
 
 type RequestRow = {
   id: string;
@@ -29,13 +30,34 @@ function naira(n: number) {
   return `N${Math.round(Number(n) || 0).toLocaleString()}`;
 }
 
+function quoteStatusChip(status: string | null) {
+  const s = (status ?? "pending").toLowerCase();
+  if (s === "approved") return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  if (s === "quoted") return "border-blue-200 bg-blue-50 text-blue-800";
+  return "border-amber-200 bg-amber-50 text-amber-800";
+}
+
+function quoteStatusLabel(status: string | null) {
+  const s = (status ?? "pending").toLowerCase();
+  if (s === "approved") return "Approved";
+  if (s === "quoted") return "Quoted";
+  return "Pending quote";
+}
+
 export default function AdminCustomFoodRequestsPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [orderDeliveryFee, setOrderDeliveryFee] = useState<
-    Array<{ id: string; delivery_fee: number | null; notes: string | null }>
+    Array<{
+      id: string;
+      delivery_fee: number | null;
+      subtotal: number | null;
+      total: number | null;
+      status: string | null;
+      notes: string | null;
+    }>
   >([]);
 
   useEffect(() => {
@@ -63,7 +85,14 @@ export default function AdminCustomFoodRequestsPage() {
         error?: string;
         requests?: RequestRow[];
         items?: ItemRow[];
-        orderDeliveryFee?: Array<{ id: string; delivery_fee: number | null; notes: string | null }>;
+        orderDeliveryFee?: Array<{
+          id: string;
+          delivery_fee: number | null;
+          subtotal: number | null;
+          total: number | null;
+          status: string | null;
+          notes: string | null;
+        }>;
       } | null;
 
       if (!res.ok || !body?.ok) {
@@ -116,6 +145,7 @@ export default function AdminCustomFoodRequestsPage() {
   }, [orderDeliveryFee, requests, itemsByRequest]);
 
   const recentOrders = useMemo(() => requests.slice(0, 5), [requests]);
+  const orderInfoById = useMemo(() => new Map(orderDeliveryFee.map((row) => [row.id, row])), [orderDeliveryFee]);
 
   return (
     <main className="space-y-4">
@@ -158,6 +188,15 @@ export default function AdminCustomFoodRequestsPage() {
                       <p className="text-sm font-medium truncate">{orderNameByOrderId.get(req.order_id) || "Food order"}</p>
                       <p className="text-sm font-semibold">{naira(req.total_amount)}</p>
                     </div>
+                    <div className="mt-1">
+                      <span
+                        className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${quoteStatusChip(
+                          parseErrandQuote(orderInfoById.get(req.order_id)?.notes).status
+                        )}`}
+                      >
+                        {quoteStatusLabel(parseErrandQuote(orderInfoById.get(req.order_id)?.notes).status)}
+                      </span>
+                    </div>
                     <p className="mt-1 text-xs text-gray-600">
                       {req.restaurant_name} - {new Date(req.created_at).toLocaleString()}
                     </p>
@@ -169,9 +208,21 @@ export default function AdminCustomFoodRequestsPage() {
             <div className="grid gap-3">
               {requests.map((req) => (
                 <Link key={req.id} href={`/admin/custom-food-requests/${req.id}`} className="block rounded-2xl border bg-white p-4 hover:bg-gray-50">
+                  {(() => {
+                    const orderInfo = orderInfoById.get(req.order_id);
+                    const quoteMeta = parseErrandQuote(orderInfo?.notes);
+                    const quotedTotal = Number(orderInfo?.total ?? req.total_amount + Number(orderInfo?.delivery_fee ?? 0));
+                    return (
+                      <>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-semibold truncate">{orderNameByOrderId.get(req.order_id) || "Food order"}</p>
                     <p className="text-xs text-gray-500">{new Date(req.created_at).toLocaleString()}</p>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${quoteStatusChip(quoteMeta.status)}`}>
+                      {quoteStatusLabel(quoteMeta.status)}
+                    </span>
+                    <span className="text-xs text-gray-500">Quoted total: {naira(quotedTotal)}</span>
                   </div>
                   <p className="mt-1 text-sm text-gray-600">{req.restaurant_name}</p>
                   <p className="mt-1 text-xs text-gray-500">{req.plate_name}</p>
@@ -201,6 +252,9 @@ export default function AdminCustomFoodRequestsPage() {
                       </div>
                     ))}
                   </div>
+                      </>
+                    );
+                  })()}
                 </Link>
               ))}
             </div>

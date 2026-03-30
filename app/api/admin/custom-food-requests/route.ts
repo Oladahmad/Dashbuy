@@ -105,17 +105,31 @@ export async function GET(req: NextRequest) {
     }
 
     const orderIds = requests.map((r) => r.order_id).filter(Boolean);
-    let orderDeliveryFee: Array<{ id: string; delivery_fee: number | null; notes: string | null }> = [];
+    let orderDeliveryFee: Array<{
+      id: string;
+      delivery_fee: number | null;
+      subtotal: number | null;
+      total: number | null;
+      status: string | null;
+      notes: string | null;
+    }> = [];
     if (orderIds.length > 0) {
       const orderRowsRes = await retryOperation(
         async () =>
           await supabaseAdmin
             .from("orders")
-            .select("id,delivery_fee,notes")
+            .select("id,delivery_fee,subtotal,total,status,notes")
             .in("id", orderIds),
         3
       );
-      const orderRows = orderRowsRes.data as Array<{ id: string; delivery_fee: number | null; notes: string | null }> | null;
+      const orderRows = orderRowsRes.data as Array<{
+        id: string;
+        delivery_fee: number | null;
+        subtotal: number | null;
+        total: number | null;
+        status: string | null;
+        notes: string | null;
+      }> | null;
       const orderRowsErr = orderRowsRes.error;
       if (orderRowsErr) {
         if (isTransientNetworkMessage(orderRowsErr.message)) {

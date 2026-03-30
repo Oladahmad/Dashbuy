@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { resolveTrackingStatus } from "@/lib/orderTracking";
 import { useParams, useRouter } from "next/navigation";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
+import { parseErrandQuote } from "@/lib/errandQuote";
 
 type OrderRow = {
   id: string;
@@ -38,6 +39,7 @@ type OrderSummary = {
   customer_id: string;
   orderIds: string[];
   orderName: string;
+  errandQuoteState: "none" | "pending" | "quoted" | "approved";
 };
 
 type VendorTrackingCard = {
@@ -149,6 +151,16 @@ function summarizeOrders(orders: OrderRow[]): OrderSummary {
     orderIds: sorted.map((row) => row.id),
     orderName:
       sorted.map((row) => extractOrderNameFromNotes(row.notes)).find((name) => name.length > 0) ?? "",
+    errandQuoteState: (() => {
+      const states = sorted
+        .map((row) => parseErrandQuote(row.notes))
+        .filter((meta) => meta.isErrand)
+        .map((meta) => meta.status ?? "pending");
+      if (states.length === 0) return "none";
+      if (states.includes("pending")) return "pending";
+      if (states.includes("quoted")) return "quoted";
+      return "approved";
+    })(),
   };
 }
 
@@ -168,6 +180,7 @@ export default function OrderDetailsPage() {
   const [comboItems, setComboItems] = useState<ComboItemRow[]>([]);
   const [plateItems, setPlateItems] = useState<PlateItemRow[]>([]);
   const [vendorTracking, setVendorTracking] = useState<VendorTrackingCard[]>([]);
+  const [approvingQuote, setApprovingQuote] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -443,6 +456,38 @@ export default function OrderDetailsPage() {
       : `/food/pay?orderId=${encodeURIComponent(order.id)}`;
   }, [order]);
 
+  async function approveQuoteAndPay() {
+    if (!order) return;
+    setApprovingQuote(true);
+    setMsg("");
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) {
+      setApprovingQuote(false);
+      router.push("/auth/login?next=%2Forders");
+      return;
+    }
+
+    const res = await fetch("/api/orders/approve-quote", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ orderIds: order.orderIds }),
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!res.ok || !body?.ok) {
+      setApprovingQuote(false);
+      setMsg(body?.error ?? "Failed to approve quote.");
+      return;
+    }
+
+    setApprovingQuote(false);
+    router.push(paymentQuery);
+  }
+
   return (
     <AppShell title="Order details">
       <button className="rounded-xl border px-4 py-2 bg-white" onClick={() => router.push("/orders")} type="button">
@@ -475,7 +520,23 @@ export default function OrderDetailsPage() {
             {order.orderIds.length > 1 ? (
               <p className="mt-2 text-xs text-gray-500">{order.orderIds.length} vendor orders combined in this purchase</p>
             ) : null}
-            {(order.status ?? "").toLowerCase() === "pending_payment" ? (
+            {(order.status ?? "").toLowerCase() === "pending_payment" && order.errandQuoteState === "quoted" ? (
+              <button
+                type="button"
+                className="mt-4 rounded-xl bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
+                onClick={approveQuoteAndPay}
+                disabled={approvingQuote}
+              >
+                {approvingQuote ? "Approving..." : "Approve quote & continue payment"}
+              </button>
+            ) : null}
+            {(order.status ?? "").toLowerCase() === "pending_payment" && order.errandQuoteState === "pending" ? (
+              <p className="mt-4 text-sm text-gray-600">
+                Awaiting final quote from admin. Payment will open once quote is sent.
+              </p>
+            ) : null}
+            {(order.status ?? "").toLowerCase() === "pending_payment" &&
+            (order.errandQuoteState === "none" || order.errandQuoteState === "approved") ? (
               <button
                 type="button"
                 className="mt-4 rounded-xl bg-black px-4 py-2 text-sm text-white"

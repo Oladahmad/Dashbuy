@@ -171,7 +171,7 @@ export default function AppShell({ title, children }: AppShellProps) {
             <Link
               key={n.href}
               href={n.href}
-              className={`rounded-xl px-3 py-3 text-center text-sm border ${
+              className={`rounded-xl px-1.5 py-3 text-center text-[11px] leading-tight whitespace-nowrap border ${
                 isActive(n.href) ? "bg-black text-white border-black" : "bg-white text-gray-700"
               }`}
             >

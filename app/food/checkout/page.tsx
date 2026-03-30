@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { fallbackFoodOrderName } from "@/lib/orderName";
+import { withErrandQuoteMeta } from "@/lib/errandQuote";
 
 type PlateLine = {
   foodItemId?: string;
@@ -264,7 +265,12 @@ export default function FoodCheckoutPage() {
           delivery_address: deliveryAddressPayload,
           delivery_address_source: "manual",
           customer_phone: phoneClean,
-          notes: [`Order name: ${generatedOrderName}`, notesPayload].filter(Boolean).join(" | "),
+          notes: isCustomVendor
+            ? withErrandQuoteMeta(
+                [`Order name: ${generatedOrderName}`, notesPayload].filter(Boolean).join(" | "),
+                { isErrand: true, status: "pending" }
+              )
+            : [`Order name: ${generatedOrderName}`, notesPayload].filter(Boolean).join(" | "),
         })
         .select("id")
         .single();

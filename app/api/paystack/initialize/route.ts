@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { parseErrandQuote } from "@/lib/errandQuote";
 
 type Body = {
   orderId?: string;
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
 
     const { data: orders, error: orderErr } = await supabaseAdmin
       .from("orders")
-      .select("id,total,status,paystack_reference,customer_id")
+      .select("id,total,status,paystack_reference,customer_id,notes")
       .in("id", requestedOrderIds);
 
     if (orderErr) {
@@ -68,6 +69,17 @@ export async function POST(req: Request) {
 
     if (orders.some((order) => order.status !== "pending_payment")) {
       return NextResponse.json({ ok: false, error: "One or more orders are not pending payment" }, { status: 400 });
+    }
+
+    const blockedErrand = orders.find((order) => {
+      const meta = parseErrandQuote(asText((order as { notes?: unknown }).notes));
+      return meta.isErrand && meta.status !== "approved";
+    });
+    if (blockedErrand) {
+      return NextResponse.json(
+        { ok: false, error: "Errand quote is not approved yet. Approve quote first before payment." },
+        { status: 400 }
+      );
     }
 
     const customerIds = Array.from(new Set(orders.map((order) => asText(order.customer_id).trim()).filter(Boolean)));

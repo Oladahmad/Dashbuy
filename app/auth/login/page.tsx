@@ -113,6 +113,11 @@ function LoginPageInner() {
   return (
     <main className="min-h-screen bg-white flex items-center justify-center p-6">
       <div className="w-full max-w-md rounded-2xl border bg-white p-6">
+        <div className="mb-3">
+          <a href="/" className="inline-flex rounded-lg border px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+            Return to homepage
+          </a>
+        </div>
         <div className="flex items-center justify-center">
           <Image src="/logo.png" alt="Dashbuy" width={64} height={64} className="h-16 w-auto" />
         </div>

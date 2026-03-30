@@ -5,6 +5,7 @@ import AppShell from "@/components/AppShell";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
+import { parseErrandQuote } from "@/lib/errandQuote";
 
 type OrderRow = {
   id: string;
@@ -27,6 +28,7 @@ type OrderGroup = {
   paystack_reference: string | null;
   orders: OrderRow[];
   orderName: string;
+  errandQuoteState: "none" | "pending" | "quoted" | "approved";
 };
 
 function naira(n: number) {
@@ -113,6 +115,7 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
 
   const groupedOrders = useMemo(() => {
     const groups = new Map<string, OrderRow[]>();
@@ -128,6 +131,17 @@ export default function OrdersPage() {
         const sorted = [...group].sort((a, b) => b.created_at.localeCompare(a.created_at));
         const primary = sorted[0];
         const typeInfo = groupType(sorted);
+        const errandStates = sorted
+          .map((row) => parseErrandQuote(row.notes))
+          .filter((meta) => meta.isErrand)
+          .map((meta) => meta.status ?? "pending");
+        let errandQuoteState: OrderGroup["errandQuoteState"] = "none";
+        if (errandStates.length > 0) {
+          if (errandStates.includes("pending")) errandQuoteState = "pending";
+          else if (errandStates.includes("quoted")) errandQuoteState = "quoted";
+          else errandQuoteState = "approved";
+        }
+
         return {
           id: primary.id,
           order_type: typeInfo.order_type,
@@ -138,10 +152,48 @@ export default function OrdersPage() {
           paystack_reference: primary.paystack_reference,
           orders: sorted,
           orderName: groupOrderName(sorted),
+          errandQuoteState,
         };
       })
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }, [orders]);
+
+  async function approveQuoteAndPay(group: OrderGroup) {
+    setApprovingId(group.id);
+    setMsg("");
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) {
+      setApprovingId(null);
+      router.push("/auth/login?next=%2Forders");
+      return;
+    }
+
+    const res = await fetch("/api/orders/approve-quote", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        orderIds: group.orders.map((row) => row.id),
+      }),
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!res.ok || !body?.ok) {
+      setApprovingId(null);
+      setMsg(body?.error ?? "Failed to approve quote.");
+      return;
+    }
+
+    const paymentQuery =
+      group.orders.length > 1
+        ? `/food/pay?orderIds=${encodeURIComponent(group.orders.map((row) => row.id).join(","))}`
+        : `/food/pay?orderId=${encodeURIComponent(group.id)}`;
+    setApprovingId(null);
+    router.push(paymentQuery);
+  }
 
   const counts = useMemo(() => {
     let food = 0;
@@ -255,7 +307,13 @@ export default function OrdersPage() {
                   </div>
 
                   <div className="mt-1 flex items-center justify-between text-sm text-gray-600">
-                    <span>{friendlyStatus(o.status)}</span>
+                    <span>
+                      {o.errandQuoteState === "pending" && isPendingPayment
+                        ? "Awaiting final quote"
+                        : o.errandQuoteState === "quoted" && isPendingPayment
+                          ? "Quote ready for approval"
+                          : friendlyStatus(o.status)}
+                    </span>
                     <span>{fmtDate(o.created_at)}</span>
                   </div>
                   <p className="mt-1 text-xs text-gray-500">{typeForOrder(o)}</p>
@@ -264,7 +322,24 @@ export default function OrdersPage() {
                   ) : null}
                 </button>
 
-                {isPendingPayment ? (
+                {isPendingPayment && o.errandQuoteState === "quoted" ? (
+                  <button
+                    type="button"
+                    className="mt-3 rounded-xl bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
+                    onClick={() => approveQuoteAndPay(o)}
+                    disabled={approvingId === o.id}
+                  >
+                    {approvingId === o.id ? "Approving..." : "Approve quote & continue payment"}
+                  </button>
+                ) : null}
+
+                {isPendingPayment && o.errandQuoteState === "pending" ? (
+                  <p className="mt-3 text-sm text-gray-600">
+                    Admin is preparing your final quote. Payment will open once quote is sent.
+                  </p>
+                ) : null}
+
+                {isPendingPayment && (o.errandQuoteState === "none" || o.errandQuoteState === "approved") ? (
                   <button
                     type="button"
                     className="mt-3 rounded-xl bg-black px-4 py-2 text-sm text-white"
