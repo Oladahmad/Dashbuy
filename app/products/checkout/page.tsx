@@ -22,6 +22,26 @@ type GeoPoint = {
   accuracy: number | null;
 };
 
+function isLocalHost() {
+  if (typeof window === "undefined") return false;
+  const h = window.location.hostname;
+  return h === "localhost" || h === "127.0.0.1" || h === "::1";
+}
+
+function geoErrorMessage(err: unknown) {
+  const code = (err as GeolocationPositionError | undefined)?.code;
+  if (code === 1) return "Location permission is blocked on this phone/browser. Enable location permission and try again.";
+  if (code === 2) return "Location is unavailable right now. Turn on GPS and mobile data, then try again.";
+  if (code === 3) return "Location request timed out. Move to open sky and try again.";
+  return "Unable to get your location. Check permission, GPS, and internet, then try again.";
+}
+
+function getPosition(options: PositionOptions) {
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
+
 function formatNaira(n: number) {
   return `₦${Math.round(Number(n) || 0).toLocaleString()}`;
 }
@@ -102,18 +122,29 @@ export default function ProductCheckoutPage() {
       setMsg("Geolocation is not available on this device/browser.");
       return;
     }
+    if (!window.isSecureContext && !isLocalHost()) {
+      setMsg("Location capture requires HTTPS. On mobile, use your secure deployed URL (not local network HTTP).");
+      return;
+    }
 
     setLocating(true);
     setMsg("");
 
     try {
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 0,
-        });
-      });
+      if ("permissions" in navigator && navigator.permissions?.query) {
+        const p = await navigator.permissions.query({ name: "geolocation" as PermissionName });
+        if (p.state === "denied") {
+          setMsg("Location permission is denied. Enable it in browser settings and try again.");
+          return;
+        }
+      }
+
+      let pos: GeolocationPosition;
+      try {
+        pos = await getPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+      } catch {
+        pos = await getPosition({ enableHighAccuracy: false, timeout: 20000, maximumAge: 300000 });
+      }
 
       await new Promise((resolve) => setTimeout(resolve, 1800));
 
@@ -122,8 +153,12 @@ export default function ProductCheckoutPage() {
         lng: pos.coords.longitude,
         accuracy: Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null,
       });
-    } catch {
-      setMsg("Unable to get your location. Allow location access and try again.");
+      const accuracy = Number(pos.coords.accuracy || 0);
+      if (accuracy > 200) {
+        setMsg(`Location captured but accuracy is low (+/-${Math.round(accuracy)}m). For better result, move outdoors and recapture.`);
+      }
+    } catch (err) {
+      setMsg(geoErrorMessage(err));
     } finally {
       setLocating(false);
     }
