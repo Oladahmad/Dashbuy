@@ -2,12 +2,14 @@ export type ManualMeta = {
   isManual: boolean;
   customerName: string;
   itemsText: string;
+  riderMapUrl: string;
 };
 
 const MARKER = "[LOGI_DIRECT=1]";
 const CUSTOMER_RE = /\[LOGI_CUSTOMER=([^\]]*)\]/i;
 const ITEMS_RE = /\[LOGI_ITEMS=([^\]]*)\]/i;
-const STRIP_RE = /\[LOGI_DIRECT=1\]|\[LOGI_CUSTOMER=[^\]]*\]|\[LOGI_ITEMS=[^\]]*\]/gi;
+const RIDER_MAP_RE = /\[LOGI_RIDER_MAP=([^\]]*)\]/i;
+const STRIP_RE = /\[LOGI_DIRECT=1\]|\[LOGI_CUSTOMER=[^\]]*\]|\[LOGI_ITEMS=[^\]]*\]|\[LOGI_RIDER_MAP=[^\]]*\]/gi;
 
 function enc(v: string) {
   return encodeURIComponent(v.trim());
@@ -21,14 +23,15 @@ function dec(v: string) {
   }
 }
 
-export function buildManualLogisticsNotes(baseNotes: string, customerName: string, itemsText: string) {
+export function buildManualLogisticsNotes(baseNotes: string, customerName: string, itemsText: string, riderMapUrl = "") {
   const clean = String(baseNotes ?? "")
     .replace(STRIP_RE, "")
     .trim()
     .replace(/^\|\s*/, "")
     .replace(/\s*\|$/, "");
 
-  const marker = `${MARKER} [LOGI_CUSTOMER=${enc(customerName)}] [LOGI_ITEMS=${enc(itemsText)}]`;
+  const rider = riderMapUrl.trim() ? ` [LOGI_RIDER_MAP=${enc(riderMapUrl)}]` : "";
+  const marker = `${MARKER} [LOGI_CUSTOMER=${enc(customerName)}] [LOGI_ITEMS=${enc(itemsText)}]${rider}`;
   return clean ? `${clean} | ${marker}` : marker;
 }
 
@@ -37,10 +40,11 @@ export function parseManualLogisticsNotes(notes: string | null | undefined): Man
   const isManual = text.includes(MARKER);
   const customer = text.match(CUSTOMER_RE)?.[1] ?? "";
   const items = text.match(ITEMS_RE)?.[1] ?? "";
+  const riderMap = text.match(RIDER_MAP_RE)?.[1] ?? "";
   return {
     isManual,
     customerName: dec(customer),
     itemsText: dec(items),
+    riderMapUrl: dec(riderMap),
   };
 }
-

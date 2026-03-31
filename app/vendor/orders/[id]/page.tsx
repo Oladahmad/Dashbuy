@@ -55,6 +55,17 @@ type PlateItemRow = {
   food_item_variants: { id: string; name: string } | null;
 };
 
+type ApiOrderItem = {
+  id: string;
+  kind: "product" | "combo" | "plate";
+  name: string;
+  qty: number;
+  unitPrice: number;
+  lineTotal: number;
+  variantName: string | null;
+  imageUrl: string | null;
+};
+
 function safeNumber(x: unknown, fallback = 0) {
   if (typeof x === "number" && Number.isFinite(x)) return x;
   if (typeof x === "string") {
@@ -206,73 +217,68 @@ export default function VendorOrderDetailsPage() {
       const effectiveStatus = resolveTrackingStatus(o.status, job?.status ?? null);
       setOrder({ ...o, status: effectiveStatus });
 
-      if (o.order_type === "product") {
-        const r = await supabase
-          .from("order_items")
-          .select("id,qty,unit_price,line_total,products:product_id(id,name,image_path,price)")
-          .eq("order_id", o.id);
+      const itemsResp = await fetch("/api/orders/items", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ orderId: o.id }),
+      });
+      const itemsBody = (await itemsResp.json().catch(() => null)) as
+        | { ok?: boolean; error?: string; items?: ApiOrderItem[] }
+        | null;
+      if (!itemsResp.ok || !itemsBody?.ok) {
+        setItemsNote(itemsBody?.error ?? "Unable to load order items");
+      } else {
+        const allItems = Array.isArray(itemsBody.items) ? itemsBody.items : [];
+        const products = allItems
+          .filter((it) => it.kind === "product")
+          .map(
+            (it): ProductItemRow => ({
+              id: it.id,
+              qty: it.qty,
+              unit_price: it.unitPrice,
+              line_total: it.lineTotal,
+              products: { id: "", name: it.name, image_path: it.imageUrl, price: it.unitPrice },
+            })
+          );
+        const combos = allItems
+          .filter((it) => it.kind === "combo")
+          .map(
+            (it): ComboItemRow => ({
+              id: it.id,
+              qty: it.qty,
+              unit_price: it.unitPrice,
+              line_total: it.lineTotal,
+              food_items: { id: "", name: it.name, image_url: it.imageUrl },
+            })
+          );
+        const platesOnly = allItems
+          .filter((it) => it.kind === "plate")
+          .map(
+            (it): PlateItemRow => ({
+              id: it.id,
+              qty: it.qty,
+              unit_price: it.unitPrice,
+              line_total: it.lineTotal,
+              food_items: { id: "", name: it.name, image_url: it.imageUrl },
+              food_item_variants: it.variantName ? { id: "", name: it.variantName } : null,
+            })
+          );
 
-        if (r.error) {
-          setItemsNote(r.error.message);
-        } else {
-          const rows = (r.data ?? []) as unknown as ProductItemRow[];
-          setProductItems(rows);
-          if (rows.length === 0) setItemsNote("No items found");
-        }
-      }
+        setProductItems(products);
+        setComboItems(combos);
+        setPlateItems((o.food_mode ?? "plate") === "combo" ? platesOnly : [...platesOnly, ...combos.map((it) => ({
+          id: it.id,
+          qty: it.qty,
+          unit_price: it.unit_price,
+          line_total: it.line_total,
+          food_items: it.food_items,
+          food_item_variants: null,
+        }))]);
 
-      if (o.order_type === "food") {
-        const comboRes = await supabase
-          .from("combo_order_items")
-          .select("id,qty,unit_price,line_total,food_items:combo_food_id(id,name,image_url)")
-          .eq("order_id", o.id);
-
-        if (comboRes.error) {
-          setItemsNote(comboRes.error.message);
-        } else {
-          const comboRows = (comboRes.data ?? []) as unknown as ComboItemRow[];
-          setComboItems(comboRows);
-          const comboAsPlate: PlateItemRow[] = comboRows.map((it) => ({
-            id: `combo-${it.id}`,
-            qty: it.qty,
-            unit_price: it.unit_price,
-            line_total: it.line_total,
-            food_items: it.food_items,
-            food_item_variants: null,
-          }));
-
-          const plates = await supabase.from("order_plates").select("id,order_id").eq("order_id", o.id);
-          if (plates.error) {
-            setItemsNote(plates.error.message);
-          } else {
-            const plateRows = (plates.data ?? []) as OrderPlateRow[];
-            if (plateRows.length === 0) {
-              if ((o.food_mode ?? "plate") === "combo") {
-                if (comboRows.length === 0) setItemsNote("No items found");
-              } else {
-                setPlateItems(comboAsPlate);
-                if (comboAsPlate.length === 0) setItemsNote("No items found");
-              }
-            } else {
-              const plateIds = plateRows.map((p) => p.id);
-              const r = await supabase
-                .from("order_plate_items")
-                .select(
-                  "id,qty,unit_price,line_total,food_items:food_item_id(id,name,image_url),food_item_variants:variant_id(id,name)"
-                )
-                .in("order_plate_id", plateIds);
-
-              if (r.error) {
-                setItemsNote(r.error.message);
-              } else {
-                const rows = (r.data ?? []) as unknown as PlateItemRow[];
-                const merged = (o.food_mode ?? "plate") === "combo" ? rows : [...rows, ...comboAsPlate];
-                setPlateItems(merged);
-                if (merged.length === 0 && comboRows.length === 0) setItemsNote("No items found");
-              }
-            }
-          }
-        }
+        if (allItems.length === 0) setItemsNote("No items found");
       }
 
       setLoading(false);

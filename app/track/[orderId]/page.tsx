@@ -14,6 +14,7 @@ type TrackingPayload = {
   phone: string;
   customerName: string;
   itemsText: string;
+  riderMapUrl?: string;
   createdAt: string;
 };
 
@@ -112,6 +113,16 @@ export default function PublicTrackingPage() {
           <div className="rounded-2xl border bg-white p-4">
             <p className="font-semibold">Items requested</p>
             <pre className="mt-2 whitespace-pre-wrap text-sm text-gray-700">{data.itemsText || "-"}</pre>
+            {data.riderMapUrl && /^https?:\/\//i.test(data.riderMapUrl) ? (
+              <a
+                href={data.riderMapUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-black px-4 py-3 text-sm font-medium text-white"
+              >
+                Follow rider live on Google Maps
+              </a>
+            ) : null}
           </div>
 
           <footer className="rounded-2xl border bg-white p-4">

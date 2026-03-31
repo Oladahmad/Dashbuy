@@ -26,8 +26,10 @@ export default function LogisticsManualPage() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [itemsText, setItemsText] = useState("");
+  const [riderMapUrl, setRiderMapUrl] = useState("");
   const [total, setTotal] = useState("");
   const [msg, setMsg] = useState("");
+  const [msgType, setMsgType] = useState<"error" | "success">("error");
   const [creating, setCreating] = useState(false);
   const [generatedLink, setGeneratedLink] = useState("");
   const [recent, setRecent] = useState<ManualRow[]>([]);
@@ -59,6 +61,7 @@ export default function LogisticsManualPage() {
 
   async function createManualOrder() {
     setMsg("");
+    setMsgType("error");
     setGeneratedLink("");
 
     if (!customerName.trim()) return setMsg("Customer name is required.");
@@ -86,6 +89,7 @@ export default function LogisticsManualPage() {
         customerPhone,
         deliveryAddress,
         itemsText,
+        riderMapUrl,
         total: Number(total),
       }),
     });
@@ -96,6 +100,7 @@ export default function LogisticsManualPage() {
 
     if (!res.ok || !body?.ok) {
       setCreating(false);
+      setMsgType("error");
       setMsg(body?.error ?? "Failed to create order.");
       return;
     }
@@ -105,6 +110,7 @@ export default function LogisticsManualPage() {
     setCustomerPhone("");
     setDeliveryAddress("");
     setItemsText("");
+    setRiderMapUrl("");
     setTotal("");
     setCreating(false);
     await loadRecent();
@@ -120,6 +126,7 @@ export default function LogisticsManualPage() {
 
     setAcceptingId(orderId);
     setMsg("");
+    setMsgType("error");
     const res = await fetch("/api/logistics/manual-orders/accept", {
       method: "POST",
       headers: {
@@ -131,6 +138,7 @@ export default function LogisticsManualPage() {
     const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
     if (!res.ok || !body?.ok) {
       setAcceptingId(null);
+      setMsgType("error");
       setMsg(body?.error ?? "Failed to accept order.");
       return;
     }
@@ -143,8 +151,10 @@ export default function LogisticsManualPage() {
     if (!generatedLink) return;
     try {
       await navigator.clipboard.writeText(generatedLink);
+      setMsgType("success");
       setMsg("Tracking link copied.");
     } catch {
+      setMsgType("error");
       setMsg("Could not copy link on this device.");
     }
   }
@@ -189,6 +199,16 @@ export default function LogisticsManualPage() {
             <textarea className="mt-1 w-full rounded-xl border px-3 py-2" rows={4} placeholder={"Rice x2 - N4,000\nChicken x1 - N2,000"} value={itemsText} onChange={(e) => setItemsText(e.target.value)} />
           </div>
           <div>
+            <label className="text-sm">Rider live map link (optional)</label>
+            <input
+              className="mt-1 w-full rounded-xl border px-3 py-2"
+              placeholder="https://maps.google.com/..."
+              value={riderMapUrl}
+              onChange={(e) => setRiderMapUrl(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-gray-500">Paste a shareable Google Maps live location link for this delivery.</p>
+          </div>
+          <div>
             <label className="text-sm">Total paid amount</label>
             <input className="mt-1 w-full rounded-xl border px-3 py-2" type="number" inputMode="numeric" value={total} onChange={(e) => setTotal(e.target.value)} />
           </div>
@@ -227,11 +247,18 @@ export default function LogisticsManualPage() {
               const orderName = extractOrderNameFromNotes(row.notes) || "Delivery order";
               const isPending = String(row.status ?? "") === "pending_vendor";
               return (
-                <button
+                <div
                   key={`recent-${row.id}`}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   className="rounded-xl border p-3 text-left hover:bg-gray-50"
                   onClick={() => router.push(`/logistics/manual/${row.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      router.push(`/logistics/manual/${row.id}`);
+                    }
+                  }}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -258,15 +285,22 @@ export default function LogisticsManualPage() {
                       ) : null}
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
         )}
       </div>
 
-      {msg ? <div className="rounded-2xl border bg-white p-4 text-sm text-red-600">{msg}</div> : null}
+      {msg ? (
+        <div
+          className={`rounded-2xl border bg-white p-4 text-sm ${
+            msgType === "success" ? "text-emerald-700 border-emerald-300 bg-emerald-50" : "text-red-600"
+          }`}
+        >
+          {msg}
+        </div>
+      ) : null}
     </main>
   );
 }
-

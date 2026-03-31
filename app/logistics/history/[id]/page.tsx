@@ -30,6 +30,17 @@ type LogisticsJobRow = {
   customer_note?: string | null;
 };
 
+type OrderItemLine = {
+  id: string;
+  kind: "product" | "combo" | "plate";
+  name: string;
+  qty: number;
+  unitPrice: number;
+  lineTotal: number;
+  variantName: string | null;
+  imageUrl?: string | null;
+};
+
 function cleanText(s: string | null | undefined) {
   return String(s ?? "").trim();
 }
@@ -71,6 +82,9 @@ export default function HistoryDetailsPage() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const [job, setJob] = useState<LogisticsJobRow | null>(null);
+  const [items, setItems] = useState<OrderItemLine[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [apiTotal, setApiTotal] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -79,6 +93,8 @@ export default function HistoryDetailsPage() {
       setLoading(true);
       setMsg(null);
       setJob(null);
+      setItems([]);
+      setApiTotal(null);
 
       const { data: u } = await supabase.auth.getUser();
       const user = u.user;
@@ -149,6 +165,28 @@ export default function HistoryDetailsPage() {
       }
 
       setJob(row);
+      setItemsLoading(true);
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      if (token) {
+        const itemsResp = await fetch("/api/orders/items", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ orderId: row.order_id }),
+        });
+        const itemsBody = (await itemsResp.json().catch(() => null)) as
+          | { ok?: boolean; items?: OrderItemLine[]; order?: { total?: number } }
+          | null;
+        if (itemsResp.ok && itemsBody?.ok && Array.isArray(itemsBody.items)) {
+          setItems(itemsBody.items);
+        }
+        if (itemsResp.ok && itemsBody?.ok) {
+          setApiTotal(safeNumber(itemsBody.order?.total, 0));
+        }
+      }
+      setItemsLoading(false);
       setLoading(false);
     }
 
@@ -159,7 +197,13 @@ export default function HistoryDetailsPage() {
     };
   }, [id]);
 
-  const gross = useMemo(() => safeNumber(job?.order_total, 0), [job]);
+  const gross = useMemo(() => {
+    const jobTotal = safeNumber(job?.order_total, 0);
+    if (jobTotal > 0) return jobTotal;
+    const fetched = safeNumber(apiTotal, 0);
+    if (fetched > 0) return fetched;
+    return items.reduce((sum, it) => sum + safeNumber(it.lineTotal, 0), 0);
+  }, [job, apiTotal, items]);
 
   if (loading) return <main className="p-6">Loading...</main>;
 
@@ -259,6 +303,35 @@ export default function HistoryDetailsPage() {
                 <p className="text-sm whitespace-pre-wrap">{job.customer_note}</p>
               </div>
             ) : null}
+          </div>
+
+          <div className="rounded-2xl border bg-white p-4 space-y-2">
+            <p className="font-semibold">Items</p>
+            {itemsLoading ? (
+              <p className="text-sm text-gray-600">Loading items...</p>
+            ) : items.length === 0 ? (
+              <p className="text-sm text-gray-600">No items found</p>
+            ) : (
+              <div className="space-y-1">
+                {items.map((it) => (
+                  <div key={it.id} className="flex items-center justify-between gap-3 text-sm">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border bg-gray-50">
+                        {it.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={it.imageUrl} alt={it.name} className="h-full w-full object-cover" />
+                        ) : null}
+                      </div>
+                      <p className="min-w-0 truncate">
+                        {it.name}
+                        {it.variantName ? ` - ${it.variantName}` : ""} x{it.qty}
+                      </p>
+                    </div>
+                    <p className="font-medium">{naira(safeNumber(it.lineTotal, it.qty * it.unitPrice))}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </>
       )}

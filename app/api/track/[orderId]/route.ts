@@ -51,6 +51,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ orderId: s
         phone: order.customer_phone ?? "",
         customerName: manual.customerName,
         itemsText: manual.itemsText,
+        riderMapUrl: manual.riderMapUrl,
         createdAt: order.created_at,
       },
     });
@@ -61,4 +62,3 @@ export async function GET(_: Request, { params }: { params: Promise<{ orderId: s
     );
   }
 }
-

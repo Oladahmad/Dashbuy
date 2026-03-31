@@ -8,6 +8,7 @@ type Body = {
   deliveryAddress?: string;
   itemsText?: string;
   total?: number;
+  riderMapUrl?: string;
 };
 
 function readBearerToken(req: NextRequest) {
@@ -50,6 +51,7 @@ export async function POST(req: NextRequest) {
     const customerPhone = clean(body.customerPhone);
     const deliveryAddress = clean(body.deliveryAddress);
     const itemsText = clean(body.itemsText);
+    const riderMapUrl = clean(body.riderMapUrl);
     const total = Math.max(0, Math.round(n(body.total)));
 
     if (!customerName) return NextResponse.json({ ok: false, error: "Customer name is required" }, { status: 400 });
@@ -57,6 +59,9 @@ export async function POST(req: NextRequest) {
     if (!deliveryAddress) return NextResponse.json({ ok: false, error: "Delivery address is required" }, { status: 400 });
     if (!itemsText) return NextResponse.json({ ok: false, error: "Ordered items are required" }, { status: 400 });
     if (total <= 0) return NextResponse.json({ ok: false, error: "Total must be greater than zero" }, { status: 400 });
+    if (riderMapUrl && !/^https?:\/\//i.test(riderMapUrl)) {
+      return NextResponse.json({ ok: false, error: "Rider map link must start with http:// or https://" }, { status: 400 });
+    }
 
     const itemNames = itemsText
       .split(/[\n,]/)
@@ -65,7 +70,7 @@ export async function POST(req: NextRequest) {
       .slice(0, 3);
     const orderName = itemNames.length > 0 ? itemNames.join(", ") : "Manual delivery order";
 
-    const notes = buildManualLogisticsNotes(`Order name: ${orderName}`, customerName, itemsText);
+    const notes = buildManualLogisticsNotes(`Order name: ${orderName}`, customerName, itemsText, riderMapUrl);
 
     const { data: order, error: orderErr } = await supabaseAdmin
       .from("orders")

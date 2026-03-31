@@ -31,6 +31,17 @@ type LogisticsJobRow = {
   customer_note?: string | null;
 };
 
+type OrderItemLine = {
+  id: string;
+  kind: "product" | "combo" | "plate";
+  name: string;
+  qty: number;
+  unitPrice: number;
+  lineTotal: number;
+  variantName: string | null;
+  imageUrl?: string | null;
+};
+
 type VendorProfile = {
   id: string;
   full_name: string | null;
@@ -104,6 +115,9 @@ export default function LogisticsPage() {
 
   const [selected, setSelected] = useState<LogisticsJobRow | null>(null);
   const [saving, setSaving] = useState(false);
+  const [selectedItems, setSelectedItems] = useState<OrderItemLine[]>([]);
+  const [selectedItemsLoading, setSelectedItemsLoading] = useState(false);
+  const [selectedApiTotal, setSelectedApiTotal] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -174,16 +188,18 @@ export default function LogisticsPage() {
 
       const orderNoteMap = new Map<string, string>();
       const orderDeliveryFeeMap = new Map<string, number>();
+      const orderTotalMap = new Map<string, number>();
       if (orderIds.length > 0) {
         const { data: orderRows, error: orderErr } = await supabase
           .from("orders")
-          .select("id,notes,delivery_fee")
+          .select("id,notes,delivery_fee,total,total_amount")
           .in("id", orderIds);
 
         if (!orderErr && orderRows) {
-          for (const o of orderRows as Array<{ id: string; notes: string | null; delivery_fee: number | null }>) {
+          for (const o of orderRows as Array<{ id: string; notes: string | null; delivery_fee: number | null; total: number | null; total_amount: number | null }>) {
             orderNoteMap.set(o.id, cleanText(o.notes));
             orderDeliveryFeeMap.set(o.id, safeNumber(o.delivery_fee, 0));
+            orderTotalMap.set(o.id, safeNumber(o.total_amount ?? o.total, 0));
           }
         }
       }
@@ -242,6 +258,7 @@ export default function LogisticsPage() {
           customer_name: manual.isManual ? manual.customerName || j.customer_name : j.customer_name,
           customer_note: manual.isManual ? manual.itemsText || null : note || null,
           delivery_fee: orderDeliveryFeeMap.get(j.order_id) ?? 0,
+          order_total: safeNumber(j.order_total, orderTotalMap.get(j.order_id) ?? 0),
         };
       });
 
@@ -280,6 +297,45 @@ export default function LogisticsPage() {
     () => buildGoogleMapsUrl(selected?.delivery_address, selected?.customer_note),
     [selected]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadItems() {
+      if (!selected) {
+        setSelectedItems([]);
+        setSelectedApiTotal(null);
+        return;
+      }
+      setSelectedItemsLoading(true);
+      const { data: s } = await supabase.auth.getSession();
+      const token = s.session?.access_token;
+      if (!token) {
+        setSelectedItems([]);
+        setSelectedItemsLoading(false);
+        return;
+      }
+      const resp = await fetch("/api/orders/items", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ orderId: selected.order_id }),
+      });
+      const body = (await resp.json().catch(() => null)) as
+        | { ok?: boolean; items?: OrderItemLine[]; order?: { total?: number } }
+        | null;
+      if (!cancelled) {
+        setSelectedItems(resp.ok && body?.ok && Array.isArray(body.items) ? body.items : []);
+        setSelectedApiTotal(resp.ok && body?.ok ? safeNumber(body.order?.total, 0) : null);
+        setSelectedItemsLoading(false);
+      }
+    }
+    loadItems();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   async function setJobStatus(job: LogisticsJobRow, next: JobStatus) {
     setSaving(true);
@@ -473,7 +529,17 @@ export default function LogisticsPage() {
               <div className="rounded-xl border p-3">
                 <p className="text-xs text-gray-600">Order</p>
                 <p className="text-sm">{orderLabel(selected)}</p>
-                <p className="text-sm font-semibold mt-1">{naira(safeNumber(selected.order_total, 0))}</p>
+                <p className="text-sm font-semibold mt-1">
+                  {naira(
+                    (() => {
+                      const rowTotal = safeNumber(selected.order_total, 0);
+                      if (rowTotal > 0) return rowTotal;
+                      const apiTotal = safeNumber(selectedApiTotal, 0);
+                      if (apiTotal > 0) return apiTotal;
+                      return selectedItems.reduce((sum, it) => sum + safeNumber(it.lineTotal, 0), 0);
+                    })()
+                  )}
+                </p>
               </div>
 
               <div className="rounded-xl border p-3">
@@ -491,6 +557,35 @@ export default function LogisticsPage() {
                 {cleanText(selected.customer_note) ? (
                   <p className="text-sm mt-1">Note: {selected.customer_note}</p>
                 ) : null}
+              </div>
+
+              <div className="rounded-xl border p-3">
+                <p className="text-xs text-gray-600">Items</p>
+                {selectedItemsLoading ? (
+                  <p className="mt-1 text-sm text-gray-600">Loading items...</p>
+                ) : selectedItems.length === 0 ? (
+                  <p className="mt-1 text-sm text-gray-600">No items found</p>
+                ) : (
+                  <div className="mt-2 space-y-1">
+                    {selectedItems.map((it) => (
+                      <div key={it.id} className="flex items-center justify-between gap-3 text-sm">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border bg-gray-50">
+                            {it.imageUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={it.imageUrl} alt={it.name} className="h-full w-full object-cover" />
+                            ) : null}
+                          </div>
+                          <p className="min-w-0 truncate">
+                            {it.name}
+                            {it.variantName ? ` - ${it.variantName}` : ""} x{it.qty}
+                          </p>
+                        </div>
+                        <p className="font-medium">{naira(safeNumber(it.lineTotal, it.qty * it.unitPrice))}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
