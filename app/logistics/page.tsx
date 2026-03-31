@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import { parseManualLogisticsNotes } from "@/lib/manualLogistics";
 
 type JobStatus = "pending_pickup" | "picked_up" | "delivered" | "cancelled";
 
@@ -69,6 +70,27 @@ function orderLabel(j: LogisticsJobRow) {
 
 function cleanText(s: string | null | undefined) {
   return String(s ?? "").trim();
+}
+
+function extractLatLng(text: string) {
+  const m = text.match(/(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+function buildGoogleMapsUrl(deliveryAddress: string | null | undefined, note: string | null | undefined) {
+  const a = cleanText(deliveryAddress);
+  const n = cleanText(note);
+  const fromCoords = extractLatLng(a) ?? extractLatLng(n);
+  if (fromCoords) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${fromCoords.lat},${fromCoords.lng}`;
+  }
+  const q = a || n;
+  if (!q) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 }
 
 export default function LogisticsPage() {
@@ -209,12 +231,16 @@ export default function LogisticsPage() {
           cleanText(v?.address) ||
           "";
 
+        const note = orderNoteMap.get(j.order_id) || "";
+        const manual = parseManualLogisticsNotes(note);
+
         return {
           ...j,
           vendor_name: vendorName || null,
           vendor_phone: vendorPhone || null,
           vendor_address: vendorAddress || null,
-          customer_note: orderNoteMap.get(j.order_id) || null,
+          customer_name: manual.isManual ? manual.customerName || j.customer_name : j.customer_name,
+          customer_note: manual.isManual ? manual.itemsText || null : note || null,
           delivery_fee: orderDeliveryFeeMap.get(j.order_id) ?? 0,
         };
       });
@@ -250,6 +276,10 @@ export default function LogisticsPage() {
   );
 
   const list = tab === "pending_pickup" ? pendingPickupJobs : pickedUpJobs;
+  const selectedMapUrl = useMemo(
+    () => buildGoogleMapsUrl(selected?.delivery_address, selected?.customer_note),
+    [selected]
+  );
 
   async function setJobStatus(job: LogisticsJobRow, next: JobStatus) {
     setSaving(true);
@@ -298,6 +328,14 @@ export default function LogisticsPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-xl border px-3 py-2 text-sm"
+              onClick={() => router.push("/logistics/manual")}
+            >
+              Manual orders
+            </button>
+
             <button
               type="button"
               className="rounded-xl border px-3 py-2 text-sm"
@@ -457,9 +495,22 @@ export default function LogisticsPage() {
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-2">
+              {selectedMapUrl ? (
+                <a
+                  href={selectedMapUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="col-span-2 inline-flex items-center justify-center rounded-xl border px-4 py-3 text-sm font-medium"
+                >
+                  Open destination in Google Maps
+                </a>
+              ) : null}
+
               <button
                 type="button"
-                className="rounded-xl bg-black text-white px-4 py-3 text-sm disabled:opacity-50"
+                className={`rounded-xl px-4 py-3 text-sm ${
+                  selected.status === "pending_pickup" ? "bg-black text-white" : "border bg-white"
+                } disabled:cursor-not-allowed disabled:opacity-40`}
                 disabled={saving || selected.status !== "pending_pickup"}
                 onClick={() => setJobStatus(selected, "picked_up")}
               >
@@ -468,7 +519,9 @@ export default function LogisticsPage() {
 
               <button
                 type="button"
-                className="rounded-xl border px-4 py-3 text-sm disabled:opacity-50"
+                className={`rounded-xl px-4 py-3 text-sm ${
+                  selected.status === "picked_up" ? "bg-black text-white" : "border bg-white"
+                } disabled:cursor-not-allowed disabled:opacity-40`}
                 disabled={saving || selected.status !== "picked_up"}
                 onClick={() => setJobStatus(selected, "delivered")}
               >

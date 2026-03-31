@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import { parseManualLogisticsNotes } from "@/lib/manualLogistics";
 
 type JobStatus = "pending_pickup" | "picked_up" | "delivered" | "cancelled";
 
@@ -151,7 +152,15 @@ export default function HistoryPage() {
       setJobs(
         rows.map((r) => ({
           ...r,
-          customer_note: orderNoteMap.get(r.order_id) || null,
+          customer_name: (() => {
+            const m = parseManualLogisticsNotes(orderNoteMap.get(r.order_id) || "");
+            return m.isManual ? m.customerName || r.customer_name : r.customer_name;
+          })(),
+          customer_note: (() => {
+            const note = orderNoteMap.get(r.order_id) || "";
+            const m = parseManualLogisticsNotes(note);
+            return m.isManual ? m.itemsText || null : note || null;
+          })(),
         }))
       );
       setLoading(false);
