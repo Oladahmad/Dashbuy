@@ -163,15 +163,18 @@ export default function AppShell({ title, children }: AppShellProps) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-xl px-4 py-4 pb-24">{children}</main>
+      <main className="mx-auto max-w-xl px-4 py-4 pb-32">{children}</main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t">
-        <div className="mx-auto max-w-xl px-4 py-2 grid grid-cols-5 gap-2">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/95 backdrop-blur">
+        <div
+          className="mx-auto grid max-w-xl grid-cols-5 gap-2 px-4 py-2"
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }}
+        >
           {nav.map((n) => (
             <Link
               key={n.href}
               href={n.href}
-              className={`rounded-xl px-1.5 py-3 text-center text-[11px] leading-tight whitespace-nowrap border ${
+              className={`flex h-14 items-center justify-center rounded-xl border px-2 text-center text-xs leading-tight whitespace-nowrap ${
                 isActive(n.href) ? "bg-black text-white border-black" : "bg-white text-gray-700"
               }`}
             >
