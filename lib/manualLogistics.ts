@@ -10,6 +10,7 @@ const CUSTOMER_RE = /\[LOGI_CUSTOMER=([^\]]*)\]/i;
 const ITEMS_RE = /\[LOGI_ITEMS=([^\]]*)\]/i;
 const RIDER_MAP_RE = /\[LOGI_RIDER_MAP=([^\]]*)\]/i;
 const STRIP_RE = /\[LOGI_DIRECT=1\]|\[LOGI_CUSTOMER=[^\]]*\]|\[LOGI_ITEMS=[^\]]*\]|\[LOGI_RIDER_MAP=[^\]]*\]/gi;
+const STRIP_RIDER_MAP_RE = /\[LOGI_RIDER_MAP=[^\]]*\]/gi;
 
 function enc(v: string) {
   return encodeURIComponent(v.trim());
@@ -47,4 +48,25 @@ export function parseManualLogisticsNotes(notes: string | null | undefined): Man
     itemsText: dec(items),
     riderMapUrl: dec(riderMap),
   };
+}
+
+export function stripLogisticsMeta(notes: string | null | undefined) {
+  return String(notes ?? "")
+    .replace(STRIP_RE, "")
+    .trim()
+    .replace(/^\|\s*/, "")
+    .replace(/\s*\|$/, "");
+}
+
+export function upsertRiderMapInNotes(notes: string | null | undefined, riderMapUrl: string) {
+  const cleanBase = String(notes ?? "")
+    .replace(STRIP_RIDER_MAP_RE, "")
+    .trim()
+    .replace(/\s*\|\s*$/, "");
+
+  const rider = riderMapUrl.trim();
+  if (!rider) return cleanBase;
+
+  const marker = `[LOGI_RIDER_MAP=${enc(rider)}]`;
+  return cleanBase ? `${cleanBase} | ${marker}` : marker;
 }

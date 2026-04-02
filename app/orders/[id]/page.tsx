@@ -8,6 +8,7 @@ import { resolveTrackingStatus } from "@/lib/orderTracking";
 import { useParams, useRouter } from "next/navigation";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
 import { parseErrandQuote } from "@/lib/errandQuote";
+import { parseManualLogisticsNotes } from "@/lib/manualLogistics";
 
 type OrderRow = {
   id: string;
@@ -50,6 +51,7 @@ type VendorTrackingCard = {
   total: number;
   orderType: "food" | "product";
   foodMode: "plate" | "combo" | null;
+  riderMapUrl: string;
 };
 
 type VendorProfile = {
@@ -265,27 +267,35 @@ export default function OrderDetailsPage() {
         }
         setVendorNames(nextNames);
         setVendorTracking(
-          resolvedOrders.map((row) => ({
-            orderId: row.id,
-            vendorId: row.vendor_id,
-            vendorName: nextNames[row.vendor_id] || "Vendor",
-            status: row.status,
-            total: safeNumber(row.total),
-            orderType: row.order_type,
-            foodMode: row.food_mode,
-          }))
+          resolvedOrders.map((row) => {
+            const manual = parseManualLogisticsNotes(row.notes);
+            return {
+              orderId: row.id,
+              vendorId: row.vendor_id,
+              vendorName: nextNames[row.vendor_id] || "Vendor",
+              status: row.status,
+              total: safeNumber(row.total),
+              orderType: row.order_type,
+              foodMode: row.food_mode,
+              riderMapUrl: manual.riderMapUrl || "",
+            };
+          })
         );
       } else {
         setVendorTracking(
-          resolvedOrders.map((row) => ({
-            orderId: row.id,
-            vendorId: row.vendor_id,
-            vendorName: "Vendor",
-            status: row.status,
-            total: safeNumber(row.total),
-            orderType: row.order_type,
-            foodMode: row.food_mode,
-          }))
+          resolvedOrders.map((row) => {
+            const manual = parseManualLogisticsNotes(row.notes);
+            return {
+              orderId: row.id,
+              vendorId: row.vendor_id,
+              vendorName: "Vendor",
+              status: row.status,
+              total: safeNumber(row.total),
+              orderType: row.order_type,
+              foodMode: row.food_mode,
+              riderMapUrl: manual.riderMapUrl || "",
+            };
+          })
         );
       }
 
@@ -560,12 +570,23 @@ export default function OrderDetailsPage() {
 
             <div className="mt-4 grid gap-3">
               {vendorTracking.map((item) => (
-                <OrderTimeline
-                  key={item.orderId}
-                  status={item.status}
-                  title={item.vendorName}
-                  subtitle={`${item.orderType === "product" ? "Product order" : "Food order"} · ${naira(item.total)} · Ref ${item.orderId.slice(0, 8)}`}
-                />
+                <div key={item.orderId} className="space-y-2">
+                  <OrderTimeline
+                    status={item.status}
+                    title={item.vendorName}
+                    subtitle={`${item.orderType === "product" ? "Product order" : "Food order"} · ${naira(item.total)} · Ref ${item.orderId.slice(0, 8)}`}
+                  />
+                  {String(item.status ?? "").toLowerCase() === "picked_up" && /^https?:\/\//i.test(item.riderMapUrl) ? (
+                    <a
+                      href={item.riderMapUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex rounded-xl border px-3 py-2 text-sm font-medium"
+                    >
+                      Track rider live on Google Maps
+                    </a>
+                  ) : null}
+                </div>
               ))}
             </div>
           </div>
@@ -650,3 +671,4 @@ export default function OrderDetailsPage() {
     </AppShell>
   );
 }
+

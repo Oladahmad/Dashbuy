@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
-import { parseManualLogisticsNotes } from "@/lib/manualLogistics";
+import { parseManualLogisticsNotes, stripLogisticsMeta } from "@/lib/manualLogistics";
 
 type JobStatus = "pending_pickup" | "picked_up" | "delivered" | "cancelled";
 
@@ -29,6 +29,7 @@ type LogisticsJobRow = {
   order_total: number | null;
   delivery_fee?: number | null;
   customer_note?: string | null;
+  rider_map_url?: string | null;
 };
 
 type OrderItemLine = {
@@ -118,6 +119,7 @@ export default function LogisticsPage() {
   const [selectedItems, setSelectedItems] = useState<OrderItemLine[]>([]);
   const [selectedItemsLoading, setSelectedItemsLoading] = useState(false);
   const [selectedApiTotal, setSelectedApiTotal] = useState<number | null>(null);
+  const [riderMapUrl, setRiderMapUrl] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -249,6 +251,8 @@ export default function LogisticsPage() {
 
         const note = orderNoteMap.get(j.order_id) || "";
         const manual = parseManualLogisticsNotes(note);
+        const cleanedNote = stripLogisticsMeta(note);
+        const riderMapUrlFromNote = manual.riderMapUrl?.trim() || "";
 
         return {
           ...j,
@@ -256,7 +260,8 @@ export default function LogisticsPage() {
           vendor_phone: vendorPhone || null,
           vendor_address: vendorAddress || null,
           customer_name: manual.isManual ? manual.customerName || j.customer_name : j.customer_name,
-          customer_note: manual.isManual ? manual.itemsText || null : note || null,
+          customer_note: manual.isManual ? manual.itemsText || null : cleanedNote || null,
+          rider_map_url: riderMapUrlFromNote || null,
           delivery_fee: orderDeliveryFeeMap.get(j.order_id) ?? 0,
           order_total: safeNumber(j.order_total, orderTotalMap.get(j.order_id) ?? 0),
         };
@@ -337,7 +342,7 @@ export default function LogisticsPage() {
     };
   }, [selected]);
 
-  async function setJobStatus(job: LogisticsJobRow, next: JobStatus) {
+  async function setJobStatus(job: LogisticsJobRow, next: JobStatus, nextRiderMapUrl?: string) {
     setSaving(true);
     setMsg(null);
 
@@ -355,7 +360,7 @@ export default function LogisticsPage() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ jobId: job.id, nextStatus: next }),
+      body: JSON.stringify({ jobId: job.id, nextStatus: next, riderMapUrl: (nextRiderMapUrl ?? "").trim() }),
     });
 
     const body = (await resp.json()) as { ok?: boolean; error?: string };
@@ -365,8 +370,16 @@ export default function LogisticsPage() {
       return;
     }
 
-    setJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, status: next } : j)));
-    setSelected((prev) => (prev && prev.id === job.id ? { ...prev, status: next } : prev));
+    setJobs((prev) =>
+      prev.map((j) =>
+        j.id === job.id ? { ...j, status: next, rider_map_url: (nextRiderMapUrl ?? "").trim() || j.rider_map_url } : j
+      )
+    );
+    setSelected((prev) =>
+      prev && prev.id === job.id
+        ? { ...prev, status: next, rider_map_url: (nextRiderMapUrl ?? "").trim() || prev.rider_map_url }
+        : prev
+    );
     setSaving(false);
 
     if (next === "picked_up") setTab("picked_up");
@@ -470,7 +483,10 @@ export default function LogisticsPage() {
                   key={j.id}
                   type="button"
                   className="w-full text-left rounded-2xl border p-3 hover:bg-gray-50 cursor-pointer"
-                  onClick={() => setSelected(j)}
+                  onClick={() => {
+                    setSelected(j);
+                    setRiderMapUrl(j.rider_map_url ?? "");
+                  }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -590,6 +606,16 @@ export default function LogisticsPage() {
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="col-span-2 rounded-xl border p-3">
+                <label className="text-xs text-gray-600">Rider live map link (optional)</label>
+                <input
+                  className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                  placeholder="https://maps.google.com/..."
+                  value={riderMapUrl}
+                  onChange={(e) => setRiderMapUrl(e.target.value)}
+                />
+              </div>
+
               {selectedMapUrl ? (
                 <a
                   href={selectedMapUrl}
@@ -607,7 +633,7 @@ export default function LogisticsPage() {
                   selected.status === "pending_pickup" ? "bg-black text-white" : "border bg-white"
                 } disabled:cursor-not-allowed disabled:opacity-40`}
                 disabled={saving || selected.status !== "pending_pickup"}
-                onClick={() => setJobStatus(selected, "picked_up")}
+                onClick={() => setJobStatus(selected, "picked_up", riderMapUrl)}
               >
                 Mark picked up
               </button>
@@ -618,7 +644,7 @@ export default function LogisticsPage() {
                   selected.status === "picked_up" ? "bg-black text-white" : "border bg-white"
                 } disabled:cursor-not-allowed disabled:opacity-40`}
                 disabled={saving || selected.status !== "picked_up"}
-                onClick={() => setJobStatus(selected, "delivered")}
+                onClick={() => setJobStatus(selected, "delivered", riderMapUrl)}
               >
                 Mark delivered
               </button>

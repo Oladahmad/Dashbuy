@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { notifyOrderEvent } from "@/lib/orderNotifications";
+import { upsertRiderMapInNotes } from "@/lib/manualLogistics";
 
 type JobStatus = "pending_pickup" | "picked_up" | "delivered" | "cancelled";
 
 type Body = {
   jobId?: string;
   nextStatus?: JobStatus;
+  riderMapUrl?: string;
 };
 
 function adminClient() {
@@ -42,6 +44,7 @@ export async function POST(req: Request) {
     const body = (await req.json()) as Body;
     const jobId = String(body.jobId ?? "").trim();
     const nextStatus = String(body.nextStatus ?? "").trim() as JobStatus;
+    const riderMapUrl = String(body.riderMapUrl ?? "").trim();
 
     if (!jobId) {
       return NextResponse.json({ ok: false, error: "Missing jobId" }, { status: 400 });
@@ -49,6 +52,12 @@ export async function POST(req: Request) {
 
     if (!["pending_pickup", "picked_up", "delivered", "cancelled"].includes(nextStatus)) {
       return NextResponse.json({ ok: false, error: "Invalid nextStatus" }, { status: 400 });
+    }
+    if (riderMapUrl && !/^https?:\/\//i.test(riderMapUrl)) {
+      return NextResponse.json(
+        { ok: false, error: "Rider link must start with http:// or https://" },
+        { status: 400 }
+      );
     }
 
     const token = readBearerToken(req);
@@ -121,10 +130,26 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Update job error: " + updateJobErr.message }, { status: 500 });
     }
 
+    const { data: existingOrder, error: existingOrderErr } = await a
+      .from("orders")
+      .select("id,notes")
+      .eq("id", job.order_id)
+      .maybeSingle<{ id: string; notes: string | null }>();
+
+    if (existingOrderErr || !existingOrder) {
+      return NextResponse.json(
+        { ok: false, error: "Order read error: " + (existingOrderErr?.message ?? "Order not found") },
+        { status: 500 }
+      );
+    }
+
     const orderStatus = toOrderStatus(nextStatus);
+    const nextNotes = riderMapUrl
+      ? upsertRiderMapInNotes(existingOrder.notes, riderMapUrl)
+      : existingOrder.notes;
     const { error: updateOrderErr } = await a
       .from("orders")
-      .update({ status: orderStatus })
+      .update({ status: orderStatus, notes: nextNotes })
       .eq("id", job.order_id);
 
     if (updateOrderErr) {
