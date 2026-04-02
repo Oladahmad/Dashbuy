@@ -150,6 +150,11 @@ export default function AdminCustomFoodRequestsPage() {
   return (
     <main className="space-y-4">
       <div className="rounded-2xl border bg-white p-4">
+        <div className="mb-3">
+          <Link href="/admin" className="inline-flex items-center rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">
+            Back
+          </Link>
+        </div>
         <h1 className="text-lg font-semibold">Custom Food Requests (Test Run)</h1>
         <p className="mt-1 text-sm text-gray-600">
           This page lists all customer custom restaurant food requests submitted from the Food page.

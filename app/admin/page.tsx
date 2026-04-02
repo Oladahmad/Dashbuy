@@ -61,9 +61,10 @@ export default function AdminPage() {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border bg-white p-4">
-        <p className="text-sm text-gray-600">Admin metrics</p>
-        <p className="text-base font-semibold">Registration overview</p>
+      <div className="overflow-hidden rounded-2xl border bg-gradient-to-br from-black via-neutral-900 to-neutral-800 p-5 text-white">
+        <p className="text-xs uppercase tracking-[0.2em] text-white/70">Dashbuy Admin</p>
+        <p className="mt-2 text-2xl font-semibold">Platform Metrics</p>
+        <p className="mt-1 text-sm text-white/80">Live registration overview for customers and vendors.</p>
       </div>
 
       {loading ? <div className="rounded-2xl border bg-white p-4 text-sm text-gray-600">Loading metrics...</div> : null}
@@ -71,21 +72,21 @@ export default function AdminPage() {
 
       {!loading && !msg ? (
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl border bg-white p-4">
-            <p className="text-xs text-gray-600">Users</p>
-            <p className="mt-2 text-2xl font-semibold">{metrics.usersCount.toLocaleString()}</p>
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Users</p>
+            <p className="mt-2 text-4xl font-bold text-black">{metrics.usersCount.toLocaleString()}</p>
             <p className="mt-1 text-xs text-gray-500">Customer accounts</p>
           </div>
 
-          <div className="rounded-2xl border bg-white p-4">
-            <p className="text-xs text-gray-600">Product vendors</p>
-            <p className="mt-2 text-2xl font-semibold">{metrics.vendorProductsCount.toLocaleString()}</p>
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Product vendors</p>
+            <p className="mt-2 text-4xl font-bold text-black">{metrics.vendorProductsCount.toLocaleString()}</p>
             <p className="mt-1 text-xs text-gray-500">Registered product sellers</p>
           </div>
 
-          <div className="rounded-2xl border bg-white p-4">
-            <p className="text-xs text-gray-600">Food vendors</p>
-            <p className="mt-2 text-2xl font-semibold">{metrics.vendorFoodCount.toLocaleString()}</p>
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Food vendors</p>
+            <p className="mt-2 text-4xl font-bold text-black">{metrics.vendorFoodCount.toLocaleString()}</p>
             <p className="mt-1 text-xs text-gray-500">Registered food sellers</p>
           </div>
         </div>
@@ -94,7 +95,7 @@ export default function AdminPage() {
       <div className="rounded-2xl border bg-white p-4">
         <p className="font-semibold">Operations</p>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          <Link href="/admin/custom-food-requests" className="rounded-xl border px-4 py-3 text-center hover:bg-gray-50">
+          <Link href="/admin/custom-food-requests" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
             View custom food requests
           </Link>
         </div>
