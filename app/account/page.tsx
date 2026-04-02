@@ -484,6 +484,15 @@ export default function AccountPage() {
                 <p className="font-medium">Contact Support</p>
                 <p className="text-sm text-gray-600">Chat with us on WhatsApp</p>
               </a>
+
+              <button
+                className="rounded-xl border px-4 py-3 text-left"
+                onClick={() => router.push("/terms/customer")}
+                type="button"
+              >
+                <p className="font-medium">Customer Terms and Conditions</p>
+                <p className="text-sm text-gray-600">Read customer usage and order terms</p>
+              </button>
             </div>
           </div>
 

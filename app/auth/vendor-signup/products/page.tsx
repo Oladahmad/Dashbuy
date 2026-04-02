@@ -23,6 +23,7 @@ export default function ProductVendorSignupPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [acceptTerms, setAcceptTerms] = useState(false);
 
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -36,9 +37,10 @@ export default function ProductVendorSignupPage() {
       storeAddress.trim().length >= 4 &&
       email.trim().length > 3 &&
       password.trim().length >= 6 &&
+      acceptTerms &&
       !loading
     );
-  }, [storeName, storePhone, storeAddress, email, password, loading]);
+  }, [storeName, storePhone, storeAddress, email, password, acceptTerms, loading]);
 
   function validateForm() {
     const errors: VendorSignupFieldErrors = {};
@@ -228,6 +230,22 @@ export default function ProductVendorSignupPage() {
               </div>
               {fieldErrors.password ? <p className="mt-1 text-xs text-red-600">{fieldErrors.password}</p> : null}
             </div>
+
+            <label className="flex items-start gap-2 text-xs text-gray-700">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border"
+                checked={acceptTerms}
+                onChange={(e) => setAcceptTerms(e.target.checked)}
+              />
+              <span className="font-semibold">
+                I agree to Dashbuy{" "}
+                <a className="underline" href="/terms/vendor">
+                  Vendor Terms and Conditions
+                </a>
+                .
+              </span>
+            </label>
 
             <button
               disabled={!canSubmit}

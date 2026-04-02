@@ -75,7 +75,7 @@ function getPosition(options: PositionOptions) {
 }
 
 const FOOD_CART_KEY = "dashbuy_food_cart_v1";
-const DELIVERY_FEE = 700;
+const DELIVERY_FEE = 900;
 const CUSTOM_REQUEST_VENDOR_ID = "custom_request";
 
 function formatNaira(n: number) {

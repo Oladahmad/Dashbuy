@@ -15,7 +15,7 @@ type CartItem = {
 };
 
 const CART_KEY = "dashbuy_products_cart_v1";
-const DELIVERY_FEE = 700;
+const DELIVERY_FEE = 900;
 
 function naira(n: number) {
   return `₦${Math.round(n).toLocaleString()}`;

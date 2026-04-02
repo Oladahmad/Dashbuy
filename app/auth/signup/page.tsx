@@ -23,6 +23,7 @@ export default function UserSignupPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [acceptTerms, setAcceptTerms] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -165,10 +166,26 @@ export default function UserSignupPage() {
 
           {msg ? <p className={`text-sm ${msg.includes("inbox or spam") ? "text-green-700" : "text-red-600"}`}>{msg}</p> : null}
 
+          <label className="flex items-start gap-2 text-xs text-gray-700">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border"
+              checked={acceptTerms}
+              onChange={(e) => setAcceptTerms(e.target.checked)}
+            />
+            <span className="font-semibold">
+              I agree to Dashbuy{" "}
+              <a className="underline" href="/terms/customer">
+                Customer Terms and Conditions
+              </a>
+              .
+            </span>
+          </label>
+
           <button
             className="w-full rounded-xl bg-black px-4 py-3 text-white disabled:opacity-60"
             onClick={onSignup}
-            disabled={loading || !fullName || !phone || !address || !email || !password}
+            disabled={loading || !fullName || !phone || !address || !email || !password || !acceptTerms}
           >
             {loading ? "Creating..." : "Create account"}
           </button>

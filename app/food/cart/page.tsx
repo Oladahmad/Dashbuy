@@ -47,7 +47,7 @@ type FoodCart = {
 
 const FOOD_CART_KEY = "dashbuy_food_cart_v1";
 const LEGACY_COMBO_CART_KEY = "dashbuy_combo_cart_v1";
-const DELIVERY_FEE = 700;
+const DELIVERY_FEE = 900;
 
 function formatNaira(n: number) {
   return `N${Math.round(n).toLocaleString()}`;

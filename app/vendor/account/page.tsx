@@ -662,13 +662,21 @@ export default function VendorAccountPage() {
             <p className="font-semibold">Support</p>
 
             <a
-              className="w-full rounded-xl border px-4 py-3 text-sm block"
+              className="block w-full rounded-xl border px-4 py-3 text-center text-sm"
               href="https://wa.me/2347057602937"
               target="_blank"
               rel="noreferrer"
             >
               Contact support on WhatsApp
             </a>
+
+            <button
+              type="button"
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              onClick={() => router.push("/terms/vendor")}
+            >
+              Vendor Terms and Conditions
+            </button>
 
             <button
               type="button"
