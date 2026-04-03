@@ -71,7 +71,9 @@ function uploadCategory(row: UnknownRow) {
 function uploadPrice(row: UnknownRow, isFoodVendor: boolean) {
   if (isFoodVendor) {
     const pricingType = pickString(row, ["pricing_type"]).toLowerCase();
-    if (pricingType === "per_unit") return pickNumber(row, ["unit_price", "price"]);
+    if (pricingType === "per_unit" || pricingType === "per_scoop") {
+      return pickNumber(row, ["unit_price", "price"]);
+    }
     return pickNumber(row, ["price", "unit_price"]);
   }
   return pickNumber(row, ["price"]);

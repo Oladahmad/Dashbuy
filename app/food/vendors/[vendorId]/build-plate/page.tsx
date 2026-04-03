@@ -15,6 +15,7 @@ type FoodItem = {
   id: string;
   name: string;
   category: string;
+  image_url?: string | null;
   pricing_type: "fixed" | "per_scoop" | "per_unit" | "variant";
   price: number;
   unit_price?: number | null;
@@ -34,6 +35,8 @@ type PlateLine = {
   foodItemId: string;
   name: string;
   category: string;
+  imageUrl?: string | null;
+  parentSwallowFoodItemId?: string | null;
   pricingType: FoodItem["pricing_type"];
   qty: number;
   unitPrice: number;
@@ -133,6 +136,8 @@ function BuildPlatePageInner() {
 
   const [qtyById, setQtyById] = useState<Record<string, number>>({});
   const [variantById, setVariantById] = useState<Record<string, string>>({});
+  const [soupBySwallowId, setSoupBySwallowId] = useState<Record<string, string>>({});
+  const [openSoupPickerFor, setOpenSoupPickerFor] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -203,15 +208,20 @@ function BuildPlatePageInner() {
         if (target) {
           const nextQty: Record<string, number> = {};
           const nextVariant: Record<string, string> = { ...defaults };
+          const nextSoupBySwallow: Record<string, string> = {};
 
           for (const line of target.lines) {
             if (!line.foodItemId) continue;
             nextQty[line.foodItemId] = Number(line.qty) || 0;
             if (line.variantId) nextVariant[line.foodItemId] = line.variantId;
+            if (line.category === "soup" && line.parentSwallowFoodItemId) {
+              nextSoupBySwallow[line.parentSwallowFoodItemId] = line.foodItemId;
+            }
           }
 
           setQtyById(nextQty);
           setVariantById(nextVariant);
+          setSoupBySwallowId(nextSoupBySwallow);
           setEditingPlateAt(target.createdAt);
         } else {
           setQtyById({});
@@ -221,6 +231,7 @@ function BuildPlatePageInner() {
       } else {
         setQtyById({});
         setVariantById(defaults);
+        setSoupBySwallowId({});
         setEditingPlateAt(null);
       }
 
@@ -240,16 +251,20 @@ function BuildPlatePageInner() {
   const itemsByCategory = useMemo(() => {
     const map: Record<string, FoodItem[]> = {};
     for (const it of items) {
+      if (it.category === "soup") continue;
       if (!map[it.category]) map[it.category] = [];
       map[it.category].push(it);
     }
     return map;
   }, [items]);
 
+  const soups = useMemo(() => items.filter((it) => it.category === "soup"), [items]);
+
   const lines: PlateLine[] = useMemo(() => {
     const res: PlateLine[] = [];
 
     for (const it of items) {
+      if (it.category === "soup") continue;
       const qty = qtyById[it.id] ?? 0;
       if (qty <= 0) continue;
 
@@ -263,6 +278,7 @@ function BuildPlatePageInner() {
           foodItemId: it.id,
           name: it.name,
           category: it.category,
+          imageUrl: it.image_url ?? null,
           pricingType: it.pricing_type,
           qty,
           unitPrice: Number(selected.price),
@@ -274,16 +290,35 @@ function BuildPlatePageInner() {
           foodItemId: it.id,
           name: it.name,
           category: it.category,
+          imageUrl: it.image_url ?? null,
           pricingType: it.pricing_type,
           qty,
           unitPrice: itemUnitPrice(it),
           unitLabel: it.unit_label,
         });
       }
+
+      if (it.category === "swallow" && qty > 0) {
+        const selectedSoupId = soupBySwallowId[it.id];
+        const selectedSoup = soups.find((s) => s.id === selectedSoupId);
+        if (selectedSoup) {
+          res.push({
+            foodItemId: selectedSoup.id,
+            name: `${selectedSoup.name} (for ${it.name})`,
+            category: "soup",
+            imageUrl: selectedSoup.image_url ?? null,
+            parentSwallowFoodItemId: it.id,
+            pricingType: "fixed",
+            qty,
+            unitPrice: 0,
+            unitLabel: null,
+          });
+        }
+      }
     }
 
     return res;
-  }, [items, qtyById, variantById, variantsByFoodId]);
+  }, [items, qtyById, variantById, variantsByFoodId, soupBySwallowId, soups]);
 
   const plateFee = Number(plate?.plate_fee ?? 0);
 
@@ -294,7 +329,24 @@ function BuildPlatePageInner() {
   const plateTotal = plateFee + itemsTotal;
 
   function setQty(foodItemId: string, newQty: number) {
-    setQtyById((prev) => ({ ...prev, [foodItemId]: Math.max(0, newQty) }));
+    const safeQty = Math.max(0, newQty);
+    setQtyById((prev) => ({ ...prev, [foodItemId]: safeQty }));
+
+    const food = items.find((x) => x.id === foodItemId);
+    if (!food || food.category !== "swallow") return;
+
+    setSoupBySwallowId((prev) => {
+      if (safeQty <= 0) {
+        const next = { ...prev };
+        delete next[foodItemId];
+        return next;
+      }
+
+      if (prev[foodItemId]) return prev;
+      const firstSoupId = soups[0]?.id;
+      if (!firstSoupId) return prev;
+      return { ...prev, [foodItemId]: firstSoupId };
+    });
   }
 
   function addToCart() {
@@ -303,6 +355,18 @@ function BuildPlatePageInner() {
     if (lines.length === 0) {
       setMsg("Select at least one item to continue.");
       return;
+    }
+
+    const selectedSwallows = items.filter((it) => it.category === "swallow" && (qtyById[it.id] ?? 0) > 0);
+    if (selectedSwallows.length > 0 && soups.length === 0) {
+      setMsg("This vendor has no soup yet. Please select another swallow vendor.");
+      return;
+    }
+    for (const s of selectedSwallows) {
+      if (!soupBySwallowId[s.id]) {
+        setMsg(`Select a soup for ${s.name}.`);
+        return;
+      }
     }
 
     const existing = readCart();
@@ -338,7 +402,7 @@ function BuildPlatePageInner() {
       <button
         type="button"
         className="rounded-xl border px-3 py-2 text-sm"
-        onClick={() => router.back()}
+        onClick={() => router.push("/food?tab=restaurants")}
       >
         Back
       </button>
@@ -388,11 +452,24 @@ function BuildPlatePageInner() {
                 return (
                   <div key={it.id} className="rounded-xl border p-3">
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-semibold">{it.name}</p>
-                        <p className="mt-1 text-sm text-gray-600">
-                          {it.pricing_type} - {displayPrice}
-                        </p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-3">
+                          {it.image_url ? (
+                            <img
+                              src={it.image_url}
+                              alt={it.name}
+                              className="h-12 w-12 rounded-lg object-cover border"
+                            />
+                          ) : (
+                            <div className="h-12 w-12 rounded-lg border bg-gray-100" />
+                          )}
+                          <div className="min-w-0">
+                            <p className="font-semibold">{it.name}</p>
+                            <p className="mt-1 text-sm text-gray-600">
+                              {it.pricing_type} - {displayPrice}
+                            </p>
+                          </div>
+                        </div>
 
                         {isVariant ? (
                           <div className="mt-2">
@@ -418,6 +495,53 @@ function BuildPlatePageInner() {
                                 ))
                               )}
                             </select>
+                          </div>
+                        ) : null}
+
+                        {it.category === "swallow" && qty > 0 ? (
+                          <div className="mt-2">
+                            <label className="text-xs text-gray-600">Select soup for this swallow</label>
+                            <div className="mt-1 relative">
+                              <button
+                                type="button"
+                                className="w-full rounded-xl border px-3 py-2 text-left text-sm"
+                                onClick={() =>
+                                  setOpenSoupPickerFor((prev) => (prev === it.id ? null : it.id))
+                                }
+                              >
+                                {(() => {
+                                  const selected = soups.find((s) => s.id === soupBySwallowId[it.id]);
+                                  return selected ? `Soup: ${selected.name}` : "Choose soup";
+                                })()}
+                              </button>
+
+                              {openSoupPickerFor === it.id ? (
+                                <div className="absolute z-20 mt-1 w-full rounded-xl border bg-white p-1 shadow">
+                                  {soups.map((s) => (
+                                    <button
+                                      key={s.id}
+                                      type="button"
+                                      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-gray-100"
+                                      onClick={() => {
+                                        setSoupBySwallowId((prev) => ({ ...prev, [it.id]: s.id }));
+                                        setOpenSoupPickerFor(null);
+                                      }}
+                                    >
+                                      {s.image_url ? (
+                                        <img
+                                          src={s.image_url}
+                                          alt={s.name}
+                                          className="h-8 w-8 rounded-md border object-cover"
+                                        />
+                                      ) : (
+                                        <div className="h-8 w-8 rounded-md border bg-gray-100" />
+                                      )}
+                                      <span>{s.name}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
                         ) : null}
                       </div>

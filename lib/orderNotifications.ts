@@ -1,9 +1,10 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
 import { sendPushToUser } from "@/lib/pushNotifications";
+import { parseRejectReason } from "@/lib/orderRejection";
 
 
-type NotifyEvent = "order_paid" | "vendor_accepted" | "delivery_out" | "delivered";
+type NotifyEvent = "order_paid" | "vendor_accepted" | "vendor_rejected" | "delivery_out" | "delivered";
 
 type Contact = {
   email: string;
@@ -89,6 +90,14 @@ function fromAddress() {
   );
 }
 
+function adminAlertEmail() {
+  return (
+    process.env.ADMIN_ALERT_EMAIL ||
+    process.env.ADMIN_EMAIL ||
+    "oladunjoyeahmad@gmail.com"
+  );
+}
+
 function appBaseUrl() {
   return (
     process.env.APP_BASE_URL ||
@@ -153,6 +162,7 @@ function statusLabel(status: string | null) {
 function statusFromEvent(event: NotifyEvent, fallback: string | null) {
   if (event === "order_paid") return "pending_vendor";
   if (event === "vendor_accepted") return "accepted";
+  if (event === "vendor_rejected") return "rejected";
   if (event === "delivery_out") return "picked_up";
   if (event === "delivered") return "delivered";
   return fallback;
@@ -460,6 +470,21 @@ function buildContent(args: NotifyOrderArgs): NotifyContent {
     };
   }
 
+  if (args.event === "vendor_rejected") {
+    return {
+      vendorSubject: "",
+      vendorTitle: "",
+      vendorBody: "",
+      vendorHref: "",
+      vendorCta: "",
+      customerSubject: `Your order ${orderLabel} was declined`,
+      customerTitle: "Order declined by vendor",
+      customerBody: `<p>Your vendor declined ${orderLabel}. You can check the reason and either reorder from another restaurant or request withdrawal.</p>`,
+      customerHref,
+      customerCta: "View order",
+    };
+  }
+
   if (args.event === "delivery_out") {
     return {
       vendorSubject: `Delivery is out for ${orderLabel}`,
@@ -506,6 +531,14 @@ function buildPushCopy(args: NotifyOrderArgs, label: string): PushCopy {
       customerBody: `Your vendor accepted ${label}.`,
     };
   }
+  if (args.event === "vendor_rejected") {
+    return {
+      vendorTitle: "Order declined",
+      vendorBody: `You declined ${label}.`,
+      customerTitle: "Order declined",
+      customerBody: `Your vendor declined ${label}. Check reason in your account.`,
+    };
+  }
   if (args.event === "delivery_out") {
     return {
       vendorTitle: "Out for delivery",
@@ -532,7 +565,8 @@ export async function notifyOrderEvent(args: NotifyOrderArgs) {
     const content = buildContent(args);
     const order = snapshot.order;
     const items = snapshot.items;
-    const orderName = extractOrderNameFromNotes(order?.notes ?? null);
+  const orderName = extractOrderNameFromNotes(order?.notes ?? null);
+  const rejectReason = parseRejectReason(order?.notes ?? null);
     const label = orderName || `#${args.orderId.slice(0, 8)}`;
     const push = buildPushCopy(args, label);
     const amount = formatNaira(
@@ -581,6 +615,8 @@ export async function notifyOrderEvent(args: NotifyOrderArgs) {
           ? `Your payment was successful for ${esc(label)}. Your order has been sent to the vendor.`
           : args.event === "vendor_accepted"
           ? `Your vendor has accepted ${esc(label)} and preparation is in progress.`
+          : args.event === "vendor_rejected"
+          ? `Your vendor declined ${esc(label)}.${rejectReason ? ` Reason: ${esc(rejectReason)}.` : ""}`
           : args.event === "delivery_out"
           ? `${esc(label)} has been picked up and is currently on the way to your delivery address.`
           : `Your order ${esc(label)} has been marked as delivered.`;
@@ -594,16 +630,35 @@ export async function notifyOrderEvent(args: NotifyOrderArgs) {
       );
     }
 
+    if (args.event === "vendor_rejected") {
+      const adminTo = adminAlertEmail();
+      if (adminTo) {
+        const adminBody = `
+          <p>A vendor declined ${esc(label)}.</p>
+          <p><strong>Order:</strong> ${esc(args.orderId)}<br/><strong>Reason:</strong> ${esc(rejectReason || "Not provided")}</p>
+          ${order ? detailsBlock(order, args.event) : ""}
+          ${itemsBlock(items)}
+        `;
+        await sendEmailWithRetry(
+          adminTo,
+          `Vendor declined order #${args.orderId.slice(0, 8)}`,
+          htmlLayout("Admin", "Vendor declined an order", adminBody, orderLink(args.orderId, "vendor"), "View order")
+        );
+      }
+    }
+
     const customerUrl = appPath(`/orders/${args.orderId}`);
     const vendorUrl = appPath(`/vendor/orders/${args.orderId}`);
     const tag = `order-${args.orderId}-${args.event}`;
 
-    await sendPushToUser(args.vendorId, {
-      title: push.vendorTitle,
-      body: push.vendorBody,
-      url: vendorUrl,
-      tag,
-    });
+    if (args.event !== "vendor_rejected") {
+      await sendPushToUser(args.vendorId, {
+        title: push.vendorTitle,
+        body: push.vendorBody,
+        url: vendorUrl,
+        tag,
+      });
+    }
     await sendPushToUser(args.customerId, {
       title: push.customerTitle,
       body: push.customerBody,

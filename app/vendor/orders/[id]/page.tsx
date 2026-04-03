@@ -143,6 +143,8 @@ export default function VendorOrderDetailsPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
   const [err, setErr] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderRow | null>(null);
@@ -342,24 +344,6 @@ export default function VendorOrderDetailsPage() {
     return extractOrderNameFromNotes(order.notes);
   }, [order]);
 
-  async function updateStatus(nextStatus: string) {
-    if (!order) return;
-
-    setErr(null);
-    setSaving(true);
-
-    const { error } = await supabase.from("orders").update({ status: nextStatus }).eq("id", order.id);
-
-    if (error) {
-      setSaving(false);
-      setErr(error.message);
-      return;
-    }
-
-    setOrder({ ...order, status: nextStatus });
-    setSaving(false);
-  }
-
   async function acceptOrder() {
     if (!order) return;
 
@@ -408,6 +392,49 @@ export default function VendorOrderDetailsPage() {
     }
 
     setOrder({ ...order, status: json?.order?.status ?? "accepted" });
+    setSaving(false);
+  }
+
+  async function rejectOrder() {
+    if (!order) return;
+    const reason = rejectReason.trim();
+    if (!reason) {
+      setErr("Please provide a decline reason.");
+      return;
+    }
+
+    setErr(null);
+    setSaving(true);
+
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+    const session = sessionData.session;
+    if (!session || sessionErr) {
+      setSaving(false);
+      setErr("Not signed in");
+      return;
+    }
+
+    const resp = await fetch("/api/vendor/orders/reject", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ orderId: order.id, reason }),
+    });
+
+    const json = (await resp.json().catch(() => null)) as
+      | { ok?: boolean; error?: string; order?: { status?: string; notes?: string | null } }
+      | null;
+    if (!resp.ok || !json?.ok) {
+      setSaving(false);
+      setErr(json?.error ?? "Decline failed");
+      return;
+    }
+
+    setOrder({ ...order, status: json.order?.status ?? "rejected", notes: json.order?.notes ?? order.notes });
+    setRejectOpen(false);
+    setRejectReason("");
     setSaving(false);
   }
 
@@ -611,7 +638,7 @@ export default function VendorOrderDetailsPage() {
                     type="button"
                     className="rounded-xl border px-4 py-3 disabled:opacity-50"
                     disabled={saving}
-                    onClick={() => updateStatus("rejected")}
+                    onClick={() => setRejectOpen(true)}
                   >
                     Reject
                   </button>
@@ -620,6 +647,50 @@ export default function VendorOrderDetailsPage() {
                 <p className="mt-3 text-xs text-gray-600">
                   Accept will create a logistics job with vendor and customer snapshot, then set order status to accepted.
                 </p>
+              </div>
+            ) : null}
+
+            {rejectOpen ? (
+              <div className="fixed inset-0 z-50 bg-black/40 p-4 flex items-end sm:items-center justify-center">
+                <div className="w-full max-w-md rounded-2xl border bg-white p-4" onClick={(e) => e.stopPropagation()}>
+                  <p className="text-base font-semibold">Decline order</p>
+                  <p className="mt-1 text-sm text-gray-600">Are you sure you want to decline this order?</p>
+
+                  <div className="mt-3">
+                    <label className="text-sm font-medium">Reason</label>
+                    <textarea
+                      className="mt-1 w-full rounded-xl border p-3"
+                      placeholder="Enter decline reason"
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      rows={3}
+                      disabled={saving}
+                    />
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className="rounded-xl border px-4 py-3"
+                      onClick={() => {
+                        if (saving) return;
+                        setRejectOpen(false);
+                        setRejectReason("");
+                      }}
+                      disabled={saving}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-xl bg-black px-4 py-3 text-white disabled:opacity-50"
+                      onClick={rejectOrder}
+                      disabled={saving || !rejectReason.trim()}
+                    >
+                      {saving ? "Declining..." : "Confirm decline"}
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : null}
         </>

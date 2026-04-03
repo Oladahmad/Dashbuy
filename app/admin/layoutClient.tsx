@@ -19,7 +19,7 @@ export default function AdminLayoutClient({ children }: { children: ReactNode })
       const { data: userData } = await supabase.auth.getUser();
       const user = userData.user;
       if (!user) {
-        router.replace("/auth/login?mode=vendor");
+        router.replace("/auth/login?mode=vendor&next=%2Fadmin");
         return;
       }
 

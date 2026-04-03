@@ -97,13 +97,13 @@ function LoginPageInner() {
         await supabase.auth.signOut();
         return;
       }
-      router.replace(role === "admin" ? "/admin/custom-food-requests" : "/vendor");
+      router.replace(role === "admin" ? "/admin" : "/vendor");
       return;
     }
 
     // User mode: customers go home, admin goes to admin area
     if (role === "admin") {
-      router.replace("/admin/custom-food-requests");
+      router.replace("/admin");
       return;
     }
 

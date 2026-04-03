@@ -88,6 +88,19 @@ export default function FoodHubPage() {
   const [selectedCombo, setSelectedCombo] = useState<ComboRow | null>(null);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const tabParam = (sp.get("tab") || "").toLowerCase();
+    if (tabParam === "restaurants") {
+      setTab("restaurants");
+      return;
+    }
+    if (tabParam === "combos") {
+      setTab("combos");
+    }
+  }, []);
+
+  useEffect(() => {
     (async () => {
       setLoading(true);
       setMsg("");
@@ -308,4 +321,3 @@ export default function FoodHubPage() {
     </main>
   );
 }
-

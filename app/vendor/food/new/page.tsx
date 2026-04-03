@@ -21,6 +21,16 @@ type PlateTemplate = {
   is_active: boolean;
 };
 
+function suggestedPricingForCategory(category: FoodCategory): PricingType {
+  if (category === "main") return "per_scoop";
+  if (category === "side") return "per_scoop";
+  if (category === "protein") return "per_unit";
+  if (category === "swallow") return "fixed";
+  if (category === "soup") return "fixed";
+  if (category === "drink") return "per_unit";
+  return "per_unit";
+}
+
 function clean(s: string) {
   return s.trim();
 }
@@ -66,7 +76,6 @@ export default function VendorNewFoodPage() {
   const [category, setCategory] = useState<FoodCategory>("main");
   const [pricingType, setPricingType] = useState<PricingType>("per_scoop");
 
-  const [unitLabel, setUnitLabel] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [fixedPrice, setFixedPrice] = useState("");
 
@@ -74,6 +83,7 @@ export default function VendorNewFoodPage() {
   const [isAvailable, setIsAvailable] = useState(true);
 
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [hasSoup, setHasSoup] = useState(false);
 
   const [variants, setVariants] = useState<VariantDraft[]>([
     { name: "", price: "", is_available: true },
@@ -95,6 +105,8 @@ export default function VendorNewFoodPage() {
   const showComboFields = foodType === "combo";
   const hasPlates = plates.length > 0;
   const singleLocked = showSingleFields && !hasPlates;
+  const isSoupSingle = showSingleFields && category === "soup";
+  const isSwallowSingle = showSingleFields && category === "swallow";
 
   const showUnitPricing =
     showSingleFields && (pricingType === "per_scoop" || pricingType === "per_unit");
@@ -116,6 +128,8 @@ export default function VendorNewFoodPage() {
     if (!imageFile) return false;
 
     if (showSingleFields && !hasPlates) return false;
+
+    if (isSoupSingle) return true;
 
     if (foodType === "combo") {
       const p = toNumberOrNull(fixedPrice);
@@ -144,7 +158,7 @@ export default function VendorNewFoodPage() {
     }
 
     return false;
-  }, [name, imageFile, showSingleFields, hasPlates, foodType, pricingType, fixedPrice, stockQty, unitPrice, variants]);
+  }, [name, imageFile, showSingleFields, hasPlates, isSoupSingle, foodType, pricingType, fixedPrice, stockQty, unitPrice, variants]);
 
   useEffect(() => {
     (async () => {
@@ -168,6 +182,16 @@ export default function VendorNewFoodPage() {
       }
 
       setPlates((data as PlateTemplate[]) ?? []);
+
+      const { data: soups } = await supabase
+        .from("food_items")
+        .select("id")
+        .eq("vendor_id", vendorId)
+        .eq("food_type", "single")
+        .eq("category", "soup")
+        .eq("is_available", true)
+        .limit(1);
+      setHasSoup((soups ?? []).length > 0);
     })();
   }, []);
 
@@ -302,6 +326,12 @@ export default function VendorNewFoodPage() {
 
     const vendorId = user.id;
 
+    if (isSwallowSingle && !hasSoup) {
+      setSaving(false);
+      setErr("Add at least one soup first before listing swallow.");
+      return;
+    }
+
     let imageUrl = "";
     try {
       imageUrl = await uploadFoodImage(imageFile, vendorId);
@@ -321,12 +351,12 @@ export default function VendorNewFoodPage() {
       name: n,
       food_type: foodType,
       image_url: imageUrl,
-      short_description: d || null,
+      short_description: isSoupSingle ? null : d || null,
       is_available: isAvailable,
 
       category: showSingleFields ? category : "main",
-      pricing_type: showSingleFields ? pricingType : "fixed",
-      unit_label: clean(unitLabel) ? clean(unitLabel) : (recommendedUnitLabel || null),
+      pricing_type: isSoupSingle ? "fixed" : showSingleFields ? pricingType : "fixed",
+      unit_label: isSoupSingle ? null : recommendedUnitLabel || null,
 
       min_qty: showSingleFields ? 1 : 0,
       max_qty: null,
@@ -334,7 +364,10 @@ export default function VendorNewFoodPage() {
       stock_qty: showComboFields ? (sq ?? 0) : null,
     };
 
-    if (showFixedPricing) {
+    if (isSoupSingle) {
+      payload.price = 0;
+      payload.unit_price = null;
+    } else if (showFixedPricing) {
       payload.price = fixed ?? 0;
       payload.unit_price = null;
     } else if (showUnitPricing) {
@@ -388,22 +421,8 @@ export default function VendorNewFoodPage() {
 
     setSaving(false);
     setOk("Food saved");
+    if (isSoupSingle) setHasSoup(true);
     router.push("/vendor/food");
-  }
-
-  function setSmartDefaultsForSingle(nextPricing: PricingType) {
-    if (nextPricing === "per_scoop") {
-      setUnitLabel("Scoop");
-    }
-    if (nextPricing === "per_unit") {
-      setUnitLabel("Piece");
-    }
-    if (nextPricing === "fixed") {
-      setUnitLabel("Portion");
-    }
-    if (nextPricing === "variant") {
-      setUnitLabel("Option");
-    }
   }
 
   return (
@@ -491,7 +510,6 @@ export default function VendorNewFoodPage() {
               onClick={() => {
                 setFoodType("single");
                 setPricingType("per_scoop");
-                setSmartDefaultsForSingle("per_scoop");
               }}
               disabled={saving}
             >
@@ -506,7 +524,6 @@ export default function VendorNewFoodPage() {
               onClick={() => {
                 setFoodType("combo");
                 setPricingType("fixed");
-                setUnitLabel("Portion");
               }}
               disabled={saving}
             >
@@ -524,6 +541,33 @@ export default function VendorNewFoodPage() {
         </div>
 
         <div>
+          {showSingleFields ? (
+            <div className="mb-4">
+              <label className="text-sm text-gray-700">Category</label>
+              <select
+                className="mt-1 w-full rounded-xl border px-3 py-3"
+                value={category}
+                onChange={(e) => {
+                  const nextCategory = e.target.value as FoodCategory;
+                  setCategory(nextCategory);
+                  const suggested = suggestedPricingForCategory(nextCategory);
+                  setPricingType(suggested);
+                  setFixedPrice("");
+                  setUnitPrice("");
+                }}
+                disabled={saving || singleLocked}
+              >
+                <option value="main">Main</option>
+                <option value="side">Side</option>
+                <option value="protein">Protein</option>
+                <option value="swallow">Swallow</option>
+                <option value="soup">Soup</option>
+                <option value="drink">Drink</option>
+                <option value="extra">Extra</option>
+              </select>
+            </div>
+          ) : null}
+
           <label className="text-sm text-gray-700">Food name</label>
           <input
             className="mt-1 w-full rounded-xl border px-3 py-3"
@@ -550,7 +594,7 @@ export default function VendorNewFoodPage() {
           </div>
         </div>
 
-        {showSingleFields ? (
+        {showSingleFields && !isSoupSingle ? (
           <div className="rounded-xl border border-black/20 bg-black/[0.03] p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-800">
               Recommended
@@ -564,20 +608,32 @@ export default function VendorNewFoodPage() {
               </summary>
               <div className="mt-3 space-y-2 text-xs text-gray-700">
                 <p>
-                  <strong>Per scoop:</strong> Price for each scoop.
+                  <strong>Main:</strong> Main meal base. Best pricing: <strong>Per scoop</strong>.
                   Examples: jollof rice, fried rice.
                 </p>
                 <p>
-                  <strong>Per unit:</strong> Price for each piece/unit.
-                  Examples: chicken piece, boiled egg.
+                  <strong>Side:</strong> Side dishes that go with meals. Best pricing: <strong>Per scoop</strong> or <strong>Fixed</strong>.
+                  Examples: beans, plantain.
                 </p>
                 <p>
-                  <strong>Variant:</strong> One food with different options and prices.
-                  Examples: turkey (small/medium/big), fish (small/big).
+                  <strong>Protein:</strong> Meat and protein add-ons. Best pricing: <strong>Per unit</strong> or <strong>Variant</strong>.
+                  Examples: chicken, turkey.
                 </p>
                 <p>
-                  <strong>Fixed:</strong> One serving at one fixed price.
-                  Examples: amala pack, noodles pack.
+                  <strong>Swallow:</strong> Swallow meals. Best pricing: <strong>Per scoop</strong> or <strong>Fixed</strong>.
+                  Examples: eba, amala.
+                </p>
+                <p>
+                  <strong>Soup:</strong> Soups to pair with swallow. Best pricing: no price needed here.
+                  Examples: egusi soup, efo riro.
+                </p>
+                <p>
+                  <strong>Drink:</strong> Beverages. Best pricing: <strong>Per unit</strong> or <strong>Fixed</strong>.
+                  Examples: water, malt.
+                </p>
+                <p>
+                  <strong>Extra:</strong> Small extras/toppings. Best pricing: <strong>Per unit</strong>.
+                  Examples: boiled egg, salad.
                 </p>
               </div>
             </details>
@@ -600,25 +656,7 @@ export default function VendorNewFoodPage() {
 
         {showSingleFields ? (
           <>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-sm text-gray-700">Category</label>
-                <select
-                  className="mt-1 w-full rounded-xl border px-3 py-3"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value as FoodCategory)}
-                  disabled={saving || singleLocked}
-                >
-                  <option value="main">Main</option>
-                  <option value="side">Side</option>
-                  <option value="protein">Protein</option>
-                  <option value="swallow">Swallow</option>
-                  <option value="soup">Soup</option>
-                  <option value="drink">Drink</option>
-                  <option value="extra">Extra</option>
-                </select>
-              </div>
-
+            {!isSoupSingle ? (
               <div>
                 <label className="text-sm text-gray-700">Pricing</label>
                 <select
@@ -627,7 +665,6 @@ export default function VendorNewFoodPage() {
                   onChange={(e) => {
                     const next = e.target.value as PricingType;
                     setPricingType(next);
-                    setSmartDefaultsForSingle(next);
                     setFixedPrice("");
                     setUnitPrice("");
                   }}
@@ -639,21 +676,16 @@ export default function VendorNewFoodPage() {
                   <option value="fixed">Fixed</option>
                 </select>
               </div>
-            </div>
+            ) : null}
 
-            {showUnitPricing ? (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-sm text-gray-700">Unit label</label>
-                  <input
-                    className="mt-1 w-full rounded-xl border px-3 py-3"
-                    placeholder={recommendedUnitLabel || "Eg Scoop"}
-                    value={unitLabel}
-                    onChange={(e) => setUnitLabel(e.target.value)}
-                    disabled={saving || singleLocked}
-                  />
-                </div>
+            {isSwallowSingle && !hasSoup ? (
+              <p className="text-xs font-medium text-red-600">
+                Add at least one soup first before listing swallow.
+              </p>
+            ) : null}
 
+            {!isSoupSingle && showUnitPricing ? (
+              <div className="grid grid-cols-1 gap-2">
                 <div>
                   <label className="text-sm text-gray-700">Unit price</label>
                   <input
@@ -668,8 +700,8 @@ export default function VendorNewFoodPage() {
               </div>
             ) : null}
 
-            {showFixedPricing && showSingleFields ? (
-              <div className="grid grid-cols-2 gap-2">
+            {!isSoupSingle && showFixedPricing && showSingleFields ? (
+              <div className="grid grid-cols-1 gap-2">
                 <div>
                   <label className="text-sm text-gray-700">Fixed price</label>
                   <input
@@ -681,21 +713,10 @@ export default function VendorNewFoodPage() {
                     disabled={saving || singleLocked}
                   />
                 </div>
-
-                <div>
-                  <label className="text-sm text-gray-700">Unit label</label>
-                  <input
-                    className="mt-1 w-full rounded-xl border px-3 py-3"
-                    placeholder="Eg Portion"
-                    value={unitLabel}
-                    onChange={(e) => setUnitLabel(e.target.value)}
-                    disabled={saving || singleLocked}
-                  />
-                </div>
               </div>
             ) : null}
 
-            {showVariants ? (
+            {!isSoupSingle && showVariants ? (
               <div className="rounded-2xl border p-3">
                 <p className="font-semibold">Variants</p>
                 <p className="mt-1 text-xs text-gray-600">
@@ -827,7 +848,7 @@ export default function VendorNewFoodPage() {
         <button
           type="button"
           className="w-full rounded-xl bg-black px-4 py-3 text-white disabled:opacity-50"
-          disabled={saving}
+          disabled={saving || !canSave}
           onClick={createFoodItem}
         >
           {saving ? "Saving…" : "Save"}

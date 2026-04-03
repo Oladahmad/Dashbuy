@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
 import { ensurePushSubscribed, isPushSupported } from "@/lib/pushClient";
+import { parseRejectReason } from "@/lib/orderRejection";
 
 type OrderRow = {
   id: string;
@@ -27,6 +28,11 @@ type OrderGroup = {
   created_at: string;
   orders: OrderRow[];
   orderName: string;
+};
+
+type WithdrawRequestRow = {
+  amount: number | null;
+  status: string | null;
 };
 
 type ProfileRow = {
@@ -153,6 +159,8 @@ export default function AccountPage() {
 
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [orders, setOrders] = useState<OrderGroup[]>([]);
+  const [rejectedAvailable, setRejectedAvailable] = useState(0);
+  const [rejectedPrompt, setRejectedPrompt] = useState<{ orderId: string; reason: string } | null>(null);
 
   const requiredMissing = useMemo(() => {
     if (!profile) return true;
@@ -205,7 +213,7 @@ export default function AccountPage() {
         .select("id,order_type,food_mode,status,total,created_at,paystack_reference,notes")
         .eq("customer_id", user.id)
         .order("created_at", { ascending: false })
-        .limit(12);
+        .limit(50);
 
       if (ordErr) {
         setOrders([]);
@@ -229,6 +237,36 @@ export default function AccountPage() {
           }
         }
         setOrders(groupOrders(rows).slice(0, 3));
+
+        const rejectedRows = rows.filter((r) => {
+          const s = String(r.status ?? "").toLowerCase();
+          return s === "rejected" || s === "declined";
+        });
+        const rejectedTotal = rejectedRows.reduce((sum, r) => sum + Number(r.total ?? 0), 0);
+
+        const { data: reqRows } = await supabase
+          .from("customer_withdraw_requests")
+          .select("amount,status")
+          .eq("customer_id", user.id);
+        const reserved = ((reqRows as WithdrawRequestRow[] | null) ?? [])
+          .filter((r) => ["pending", "approved", "processing"].includes(String(r.status ?? "").toLowerCase()))
+          .reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
+        setRejectedAvailable(Math.max(0, rejectedTotal - reserved));
+
+        const latestDeclined = groupOrders(rows).find((g) => {
+          const s = String(g.status ?? "").toLowerCase();
+          return s === "rejected" || s === "declined";
+        });
+        if (latestDeclined) {
+          const firstReason =
+            latestDeclined.orders
+              .map((x) => parseRejectReason(x.notes))
+              .find((x) => x.length > 0) ?? "No reason provided.";
+          const key = `dashbuy_seen_reject_${latestDeclined.id}`;
+          if (typeof window !== "undefined" && !window.localStorage.getItem(key)) {
+            setRejectedPrompt({ orderId: latestDeclined.id, reason: firstReason });
+          }
+        }
       }
 
       setOrdersLoading(false);
@@ -307,6 +345,14 @@ export default function AccountPage() {
   async function logout() {
     await supabase.auth.signOut();
     router.push("/auth/login");
+  }
+
+  function closeRejectedPrompt() {
+    if (!rejectedPrompt) return;
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(`dashbuy_seen_reject_${rejectedPrompt.orderId}`, "1");
+    }
+    setRejectedPrompt(null);
   }
 
   async function enableNotifications() {
@@ -541,6 +587,36 @@ export default function AccountPage() {
           </div>
 
           <div className="mt-4 rounded-2xl border bg-white p-5">
+            <p className="text-lg font-semibold">Rejected order balance</p>
+            <p className="mt-1 text-sm text-gray-600">
+              Funds from declined orders are tracked here while you decide what to do next.
+            </p>
+            <div className="mt-3 rounded-xl border p-4">
+              <p className="text-xs text-gray-600">Amount available</p>
+              <p className="mt-1 text-2xl font-semibold">{naira(rejectedAvailable)}</p>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <button
+                className="rounded-xl border px-4 py-3 text-sm"
+                type="button"
+                onClick={() => router.push("/food?tab=restaurants")}
+              >
+                Check other restaurants
+              </button>
+              <button
+                className="rounded-xl bg-black px-4 py-3 text-sm text-white"
+                type="button"
+                onClick={() => router.push("/account/withdraw")}
+              >
+                Withdraw my funds
+              </button>
+            </div>
+            <button className="mt-2 w-full rounded-xl border px-4 py-3 text-sm text-gray-500" type="button" disabled>
+              Add funds (coming soon)
+            </button>
+          </div>
+
+          <div className="mt-4 rounded-2xl border bg-white p-5">
             <p className="text-lg font-semibold">Help & About</p>
 
             <div className="mt-3 grid gap-2">
@@ -583,6 +659,44 @@ export default function AccountPage() {
           </button>
 
           <div className="h-3" />
+
+          {rejectedPrompt ? (
+            <div className="fixed inset-0 z-50 bg-black/45 p-4 flex items-end sm:items-center justify-center">
+              <div className="w-full max-w-md rounded-2xl bg-white border p-4">
+                <p className="text-base font-semibold">Order declined</p>
+                <p className="mt-1 text-sm text-gray-600">Your order was declined. Check reason below.</p>
+                <div className="mt-3 rounded-xl border p-3">
+                  <p className="text-xs text-gray-600">Reason</p>
+                  <p className="mt-1 text-sm">{rejectedPrompt.reason || "No reason provided."}</p>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl border px-4 py-3 text-sm"
+                    onClick={() => {
+                      closeRejectedPrompt();
+                      router.push("/food?tab=restaurants");
+                    }}
+                  >
+                    Check other restaurants
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-xl bg-black px-4 py-3 text-sm text-white"
+                    onClick={() => {
+                      closeRejectedPrompt();
+                      router.push("/account/withdraw");
+                    }}
+                  >
+                    Withdraw my funds
+                  </button>
+                </div>
+                <button type="button" className="mt-2 w-full rounded-xl border px-4 py-3 text-sm" onClick={closeRejectedPrompt}>
+                  Close
+                </button>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
     </AppShell>
