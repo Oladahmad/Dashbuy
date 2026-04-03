@@ -104,6 +104,8 @@ export default function VendorAccountPage() {
   const [bankName, setBankName] = useState("");
   const [bankAccountNumber, setBankAccountNumber] = useState("");
   const [bankAccountName, setBankAccountName] = useState("");
+  const [showBankPopup, setShowBankPopup] = useState(false);
+  const [savingBankOnly, setSavingBankOnly] = useState(false);
 
   const [showPayouts, setShowPayouts] = useState(false);
   const [payoutsLoading, setPayoutsLoading] = useState(false);
@@ -129,6 +131,10 @@ export default function VendorAccountPage() {
     const base = profile?.store_name || profile?.full_name || "Dashbuy";
     return initialsFromName(base);
   }, [profile]);
+
+  const bankMissing = useMemo(() => {
+    return isBlank(bankName) || isBlank(bankAccountNumber) || isBlank(bankAccountName);
+  }, [bankName, bankAccountNumber, bankAccountName]);
 
   useEffect(() => {
     let alive = true;
@@ -188,6 +194,9 @@ export default function VendorAccountPage() {
       setBankName(data.bank_name ?? "");
       setBankAccountNumber(data.bank_account_number ?? "");
       setBankAccountName(data.bank_account_name ?? "");
+      if (isBlank(data.bank_name) || isBlank(data.bank_account_number) || isBlank(data.bank_account_name)) {
+        setShowBankPopup(true);
+      }
 
       const canUse = isVendorRole(data.role);
       if (!canUse) {
@@ -365,6 +374,58 @@ export default function VendorAccountPage() {
     setErr(null);
     setOk(null);
     router.push("/auth/reset-password");
+  }
+
+  async function saveBankDetailsOnly() {
+    if (!profile) {
+      setErr("Profile not loaded");
+      return;
+    }
+
+    const bn = clean(bankName);
+    const ban = clean(bankAccountName);
+    const bac = clean(bankAccountNumber);
+
+    if (!bn) {
+      setErr("Bank name is required");
+      return;
+    }
+    if (!bac || bac.length < 10) {
+      setErr("Enter a valid account number");
+      return;
+    }
+    if (!ban) {
+      setErr("Account name is required");
+      return;
+    }
+
+    setErr(null);
+    setOk(null);
+    setSavingBankOnly(true);
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        bank_name: bn,
+        bank_account_number: bac,
+        bank_account_name: ban,
+      })
+      .eq("id", profile.id);
+
+    setSavingBankOnly(false);
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+
+    setProfile({
+      ...profile,
+      bank_name: bn,
+      bank_account_number: bac,
+      bank_account_name: ban,
+    });
+    setShowBankPopup(false);
+    setOk("Bank details saved");
   }
 
   async function onLogout() {
@@ -564,6 +625,47 @@ export default function VendorAccountPage() {
                   />
                 </div>
 
+                <div className="rounded-xl border p-3">
+                  <p className="text-sm font-medium">Bank details</p>
+                  <p className="mt-1 text-xs text-gray-600">Used for your payouts.</p>
+
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="text-sm text-gray-700">Bank name</label>
+                      <input
+                        className="mt-1 w-full rounded-xl border px-3 py-3"
+                        placeholder="e.g Access Bank"
+                        value={bankName}
+                        onChange={(e) => setBankName(e.target.value)}
+                        disabled={saving}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm text-gray-700">Account number</label>
+                      <input
+                        className="mt-1 w-full rounded-xl border px-3 py-3"
+                        placeholder="10-digit account number"
+                        value={bankAccountNumber}
+                        onChange={(e) => setBankAccountNumber(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                        inputMode="numeric"
+                        disabled={saving}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm text-gray-700">Account name</label>
+                      <input
+                        className="mt-1 w-full rounded-xl border px-3 py-3"
+                        placeholder="Account name"
+                        value={bankAccountName}
+                        onChange={(e) => setBankAccountName(e.target.value)}
+                        disabled={saving}
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <button
                   type="button"
                   className="w-full rounded-xl bg-black px-4 py-3 text-white disabled:opacity-50"
@@ -686,6 +788,62 @@ export default function VendorAccountPage() {
               About Dashbuy
             </button>
           </div>
+
+          {showBankPopup ? (
+            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-3">
+              <div className="w-full max-w-md rounded-2xl border bg-white p-4">
+                <p className="text-base font-semibold">Add payout account details</p>
+                <p className="mt-1 text-sm text-gray-600">
+                  Set your bank details so vendor payouts can be resolved correctly.
+                </p>
+
+                <div className="mt-4 space-y-3">
+                  <div>
+                    <label className="text-sm text-gray-700">Bank name</label>
+                    <input
+                      className="mt-1 w-full rounded-xl border px-3 py-3"
+                      placeholder="e.g Access Bank"
+                      value={bankName}
+                      onChange={(e) => setBankName(e.target.value)}
+                      disabled={savingBankOnly}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm text-gray-700">Account number</label>
+                    <input
+                      className="mt-1 w-full rounded-xl border px-3 py-3"
+                      placeholder="10-digit account number"
+                      value={bankAccountNumber}
+                      onChange={(e) => setBankAccountNumber(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                      inputMode="numeric"
+                      disabled={savingBankOnly}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm text-gray-700">Account name</label>
+                    <input
+                      className="mt-1 w-full rounded-xl border px-3 py-3"
+                      placeholder="Account name"
+                      value={bankAccountName}
+                      onChange={(e) => setBankAccountName(e.target.value)}
+                      disabled={savingBankOnly}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="mt-4 w-full rounded-xl bg-black px-4 py-3 text-sm text-white disabled:opacity-60"
+                  disabled={savingBankOnly || bankMissing}
+                  onClick={saveBankDetailsOnly}
+                >
+                  {savingBankOnly ? "Saving..." : "Save bank details"}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </>
       ) : null}
     </div>
