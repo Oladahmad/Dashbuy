@@ -5,6 +5,7 @@ import AppShell from "@/components/AppShell";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
+import { ensurePushSubscribed, isPushSupported } from "@/lib/pushClient";
 
 type OrderRow = {
   id: string;
@@ -146,6 +147,9 @@ export default function AccountPage() {
   const [address, setAddress] = useState("");
 
   const [saving, setSaving] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMsg, setPushMsg] = useState("");
+  const [pushSupported, setPushSupported] = useState(false);
 
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [orders, setOrders] = useState<OrderGroup[]>([]);
@@ -154,6 +158,10 @@ export default function AccountPage() {
     if (!profile) return true;
     return isBlank(profile.full_name) || isBlank(profile.phone) || isBlank(profile.address);
   }, [profile]);
+
+  useEffect(() => {
+    setPushSupported(isPushSupported());
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -299,6 +307,45 @@ export default function AccountPage() {
   async function logout() {
     await supabase.auth.signOut();
     router.push("/auth/login");
+  }
+
+  async function enableNotifications() {
+    setPushBusy(true);
+    setPushMsg("");
+    const result = await ensurePushSubscribed({ askPermission: true });
+    if (!result.ok) {
+      setPushMsg(result.error);
+      setPushBusy(false);
+      return;
+    }
+    setPushMsg("Notifications enabled successfully.");
+    setPushBusy(false);
+  }
+
+  async function sendTestNotification() {
+    setPushBusy(true);
+    setPushMsg("");
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) {
+      setPushMsg("Please sign in again.");
+      setPushBusy(false);
+      return;
+    }
+
+    const res = await fetch("/api/push/test", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!res.ok || !body?.ok) {
+      setPushMsg(body?.error ?? "Could not send test notification.");
+      setPushBusy(false);
+      return;
+    }
+
+    setPushMsg("Test notification sent.");
+    setPushBusy(false);
   }
 
   return (
@@ -460,6 +507,37 @@ export default function AccountPage() {
             >
               Become a vendor →
             </button>
+          </div>
+
+          <div className="mt-4 rounded-2xl border bg-white p-5">
+            <p className="text-lg font-semibold">Push notifications</p>
+            <p className="mt-1 text-sm text-gray-600">
+              Enable app notifications for order updates and announcements.
+            </p>
+
+            {!pushSupported ? (
+              <p className="mt-3 text-sm text-amber-700">This device/browser does not support push notifications.</p>
+            ) : (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="rounded-xl bg-black px-4 py-3 text-sm text-white disabled:opacity-60"
+                  disabled={pushBusy}
+                  onClick={enableNotifications}
+                >
+                  {pushBusy ? "Please wait..." : "Enable notifications"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl border px-4 py-3 text-sm disabled:opacity-60"
+                  disabled={pushBusy}
+                  onClick={sendTestNotification}
+                >
+                  Send test notification
+                </button>
+              </div>
+            )}
+            {pushMsg ? <p className="mt-2 text-sm text-gray-700">{pushMsg}</p> : null}
           </div>
 
           <div className="mt-4 rounded-2xl border bg-white p-5">
