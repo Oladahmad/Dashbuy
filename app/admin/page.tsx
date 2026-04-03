@@ -98,6 +98,9 @@ export default function AdminPage() {
           <Link href="/admin/custom-food-requests" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
             View custom food requests
           </Link>
+          <Link href="/admin/notifications" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
+            Send push notifications
+          </Link>
         </div>
       </div>
     </div>

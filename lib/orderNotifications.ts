@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
+import { sendPushToUser } from "@/lib/pushNotifications";
 
 
 type NotifyEvent = "order_paid" | "vendor_accepted" | "delivery_out" | "delivered";
@@ -29,6 +30,13 @@ type NotifyContent = {
   customerBody: string;
   customerHref: string;
   customerCta: string;
+};
+
+type PushCopy = {
+  vendorTitle: string;
+  vendorBody: string;
+  customerTitle: string;
+  customerBody: string;
 };
 
 type OrderSnapshot = {
@@ -88,6 +96,11 @@ function appBaseUrl() {
     process.env.NEXT_PUBLIC_SITE_URL ||
     ""
   ).replace(/\/+$/, "");
+}
+
+function appPath(path: string) {
+  const base = appBaseUrl();
+  return base ? `${base}${path}` : path;
 }
 
 function supabaseBaseUrl() {
@@ -476,6 +489,39 @@ function buildContent(args: NotifyOrderArgs): NotifyContent {
   };
 }
 
+function buildPushCopy(args: NotifyOrderArgs, label: string): PushCopy {
+  if (args.event === "order_paid") {
+    return {
+      vendorTitle: "Payment confirmed",
+      vendorBody: `Customer paid for ${label}. Prepare the order.`,
+      customerTitle: "Payment successful",
+      customerBody: `Your payment for ${label} was successful.`,
+    };
+  }
+  if (args.event === "vendor_accepted") {
+    return {
+      vendorTitle: "Order accepted",
+      vendorBody: `You accepted ${label}.`,
+      customerTitle: "Vendor accepted order",
+      customerBody: `Your vendor accepted ${label}.`,
+    };
+  }
+  if (args.event === "delivery_out") {
+    return {
+      vendorTitle: "Out for delivery",
+      vendorBody: `${label} was picked up by logistics.`,
+      customerTitle: "Order on the way",
+      customerBody: `${label} is on the way to you.`,
+    };
+  }
+  return {
+    vendorTitle: "Order delivered",
+    vendorBody: `${label} has been delivered.`,
+    customerTitle: "Order delivered",
+    customerBody: `${label} has been marked as delivered.`,
+  };
+}
+
 export async function notifyOrderEvent(args: NotifyOrderArgs) {
   try {
     const [vendor, customer, snapshot] = await Promise.all([
@@ -488,6 +534,7 @@ export async function notifyOrderEvent(args: NotifyOrderArgs) {
     const items = snapshot.items;
     const orderName = extractOrderNameFromNotes(order?.notes ?? null);
     const label = orderName || `#${args.orderId.slice(0, 8)}`;
+    const push = buildPushCopy(args, label);
     const amount = formatNaira(
       safeNumber(order?.total, args.amountNaira != null ? safeNumber(args.amountNaira, 0) : 0)
     );
@@ -546,6 +593,23 @@ export async function notifyOrderEvent(args: NotifyOrderArgs) {
         htmlLayout(customer.name, customerTitle, richBody("customer", customerIntro), customerHref, customerCta)
       );
     }
+
+    const customerUrl = appPath(`/orders/${args.orderId}`);
+    const vendorUrl = appPath(`/vendor/orders/${args.orderId}`);
+    const tag = `order-${args.orderId}-${args.event}`;
+
+    await sendPushToUser(args.vendorId, {
+      title: push.vendorTitle,
+      body: push.vendorBody,
+      url: vendorUrl,
+      tag,
+    });
+    await sendPushToUser(args.customerId, {
+      title: push.customerTitle,
+      body: push.customerBody,
+      url: customerUrl,
+      tag,
+    });
   } catch (e) {
     console.warn("notifyOrderEvent failed:", e);
   }

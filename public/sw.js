@@ -55,3 +55,56 @@ self.addEventListener("fetch", (event) => {
     })
   );
 });
+
+self.addEventListener("push", (event) => {
+  let payload = {
+    title: "Dashbuy update",
+    body: "You have a new update.",
+    url: "/",
+    tag: "dashbuy-update",
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
+  };
+
+  try {
+    if (event.data) {
+      const parsed = event.data.json();
+      payload = {
+        ...payload,
+        ...parsed,
+      };
+    }
+  } catch {
+    // Ignore invalid payload and show fallback.
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: payload.icon,
+      badge: payload.badge,
+      tag: payload.tag,
+      renotify: true,
+      data: { url: payload.url || "/" },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = event.notification?.data?.url || "/";
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientsArr) => {
+      for (const client of clientsArr) {
+        if ("focus" in client) {
+          const currentUrl = new URL(client.url);
+          const target = new URL(targetUrl, self.location.origin);
+          if (currentUrl.href === target.href) return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+      return Promise.resolve();
+    })
+  );
+});
