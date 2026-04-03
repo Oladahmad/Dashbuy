@@ -104,7 +104,7 @@ export default function VendorAccountPage() {
   const [bankName, setBankName] = useState("");
   const [bankAccountNumber, setBankAccountNumber] = useState("");
   const [bankAccountName, setBankAccountName] = useState("");
-  const [showBankPopup, setShowBankPopup] = useState(false);
+  const [editingBank, setEditingBank] = useState(false);
   const [savingBankOnly, setSavingBankOnly] = useState(false);
 
   const [showPayouts, setShowPayouts] = useState(false);
@@ -194,9 +194,6 @@ export default function VendorAccountPage() {
       setBankName(data.bank_name ?? "");
       setBankAccountNumber(data.bank_account_number ?? "");
       setBankAccountName(data.bank_account_name ?? "");
-      if (isBlank(data.bank_name) || isBlank(data.bank_account_number) || isBlank(data.bank_account_name)) {
-        setShowBankPopup(true);
-      }
 
       const canUse = isVendorRole(data.role);
       if (!canUse) {
@@ -321,10 +318,6 @@ export default function VendorAccountPage() {
       store_name: profile.role === "vendor_food" || profile.role === "vendor_products" ? sn : null,
 
       logo_url: logoUrl,
-
-      bank_name: clean(bankName) ? clean(bankName) : null,
-      bank_account_number: clean(bankAccountNumber) ? clean(bankAccountNumber) : null,
-      bank_account_name: clean(bankAccountName) ? clean(bankAccountName) : null,
     };
 
     const { error } = await supabase.from("profiles").update(payload).eq("id", profile.id);
@@ -424,7 +417,7 @@ export default function VendorAccountPage() {
       bank_account_number: bac,
       bank_account_name: ban,
     });
-    setShowBankPopup(false);
+    setEditingBank(false);
     setOk("Bank details saved");
   }
 
@@ -625,47 +618,6 @@ export default function VendorAccountPage() {
                   />
                 </div>
 
-                <div className="rounded-xl border p-3">
-                  <p className="text-sm font-medium">Bank details</p>
-                  <p className="mt-1 text-xs text-gray-600">Used for your payouts.</p>
-
-                  <div className="mt-3 space-y-3">
-                    <div>
-                      <label className="text-sm text-gray-700">Bank name</label>
-                      <input
-                        className="mt-1 w-full rounded-xl border px-3 py-3"
-                        placeholder="e.g Access Bank"
-                        value={bankName}
-                        onChange={(e) => setBankName(e.target.value)}
-                        disabled={saving}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-sm text-gray-700">Account number</label>
-                      <input
-                        className="mt-1 w-full rounded-xl border px-3 py-3"
-                        placeholder="10-digit account number"
-                        value={bankAccountNumber}
-                        onChange={(e) => setBankAccountNumber(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                        inputMode="numeric"
-                        disabled={saving}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-sm text-gray-700">Account name</label>
-                      <input
-                        className="mt-1 w-full rounded-xl border px-3 py-3"
-                        placeholder="Account name"
-                        value={bankAccountName}
-                        onChange={(e) => setBankAccountName(e.target.value)}
-                        disabled={saving}
-                      />
-                    </div>
-                  </div>
-                </div>
-
                 <button
                   type="button"
                   className="w-full rounded-xl bg-black px-4 py-3 text-white disabled:opacity-50"
@@ -682,48 +634,15 @@ export default function VendorAccountPage() {
           <div className="rounded-2xl border bg-white p-4 space-y-3">
             <p className="font-semibold">Withdrawal</p>
             <p className="text-sm text-gray-600">
-              Withdraw your settled earnings to any bank account. Bank details are entered on the withdrawal page.
+              Manage bank details, daily withdrawal settings, emergency withdrawal and payout history from one page.
             </p>
-
             <button
               type="button"
-              className="w-full rounded-xl bg-black px-4 py-3 text-sm text-white"
+              className="w-full rounded-xl border px-4 py-3 text-sm hover:bg-gray-50"
               onClick={() => router.push("/vendor/withdraw")}
             >
-              Withdraw your earnings
+              Go to withdrawal page
             </button>
-
-            <button
-              type="button"
-              className="w-full rounded-xl border px-4 py-3 text-sm"
-              onClick={async () => {
-                const next = !showPayouts;
-                setShowPayouts(next);
-                if (next) await loadPayoutsInline();
-              }}
-            >
-              {showPayouts ? "Hide payout history" : "Payout history"}
-            </button>
-
-            {showPayouts ? (
-              payoutsLoading ? (
-                <div className="text-sm text-gray-600">Loading payouts…</div>
-              ) : payouts.length === 0 ? (
-                <div className="text-sm text-gray-600">No payouts yet.</div>
-              ) : (
-                <div className="grid gap-2">
-                  {payouts.map((p) => (
-                    <div key={p.id} className="rounded-xl border p-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold">{naira(p.amount)}</p>
-                        <p className="text-xs text-gray-600">{fmtDate(p.created_at)}</p>
-                      </div>
-                      {p.reference ? <p className="mt-1 text-xs text-gray-600">Ref: {p.reference}</p> : null}
-                    </div>
-                  ))}
-                </div>
-              )
-            ) : null}
           </div>
 
           {/* Logistics */}
@@ -789,63 +708,9 @@ export default function VendorAccountPage() {
             </button>
           </div>
 
-          {showBankPopup ? (
-            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-3">
-              <div className="w-full max-w-md rounded-2xl border bg-white p-4">
-                <p className="text-base font-semibold">Add payout account details</p>
-                <p className="mt-1 text-sm text-gray-600">
-                  Set your bank details so vendor payouts can be resolved correctly.
-                </p>
-
-                <div className="mt-4 space-y-3">
-                  <div>
-                    <label className="text-sm text-gray-700">Bank name</label>
-                    <input
-                      className="mt-1 w-full rounded-xl border px-3 py-3"
-                      placeholder="e.g Access Bank"
-                      value={bankName}
-                      onChange={(e) => setBankName(e.target.value)}
-                      disabled={savingBankOnly}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm text-gray-700">Account number</label>
-                    <input
-                      className="mt-1 w-full rounded-xl border px-3 py-3"
-                      placeholder="10-digit account number"
-                      value={bankAccountNumber}
-                      onChange={(e) => setBankAccountNumber(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                      inputMode="numeric"
-                      disabled={savingBankOnly}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm text-gray-700">Account name</label>
-                    <input
-                      className="mt-1 w-full rounded-xl border px-3 py-3"
-                      placeholder="Account name"
-                      value={bankAccountName}
-                      onChange={(e) => setBankAccountName(e.target.value)}
-                      disabled={savingBankOnly}
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="mt-4 w-full rounded-xl bg-black px-4 py-3 text-sm text-white disabled:opacity-60"
-                  disabled={savingBankOnly || bankMissing}
-                  onClick={saveBankDetailsOnly}
-                >
-                  {savingBankOnly ? "Saving..." : "Save bank details"}
-                </button>
-              </div>
-            </div>
-          ) : null}
         </>
       ) : null}
     </div>
   );
 }
+
