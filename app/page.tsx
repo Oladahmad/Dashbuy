@@ -6,6 +6,7 @@ import AppShell from "@/components/AppShell";
 import HomeCarousel from "@/components/HomeCarousel";
 import PwaInstallCard from "@/components/PwaInstallCard";
 import { supabase } from "@/lib/supabaseClient";
+import { parseRejectReason } from "@/lib/orderRejection";
 
 type ProductRow = {
   id: string;
@@ -103,6 +104,7 @@ export default function HomePage() {
   const [activeProduct, setActiveProduct] = useState<ProductRow | null>(null);
   const [qty, setQty] = useState(1);
   const [cartMsg, setCartMsg] = useState("");
+  const [rejectedPrompt, setRejectedPrompt] = useState<{ orderId: string; reason: string } | null>(null);
 
   function vendorLabel(p: ProductRow) {
     const store = (p.profiles?.store_name ?? "").trim();
@@ -212,6 +214,31 @@ export default function HomePage() {
         setProducts(pickTrendingProducts(rows));
       }
       setLoading(false);
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const user = sessionData.session?.user;
+      if (!user) return;
+
+      const { data: rows } = await supabase
+        .from("orders")
+        .select("id,status,notes,created_at")
+        .eq("customer_id", user.id)
+        .in("status", ["rejected", "declined"])
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const latest = (rows ?? [])[0] as { id?: string; notes?: string | null } | undefined;
+      if (!latest?.id) return;
+
+      const key = `dashbuy_seen_reject_${latest.id}`;
+      if (typeof window !== "undefined" && window.localStorage.getItem(key)) return;
+
+      const reason = parseRejectReason(latest.notes) || "No reason provided.";
+      setRejectedPrompt({ orderId: latest.id, reason });
     })();
   }, []);
 
@@ -414,6 +441,59 @@ export default function HomePage() {
           </a>
         </div>
       </div>
+
+      {rejectedPrompt ? (
+        <div className="fixed inset-0 z-50 bg-black/45 p-4 flex items-end sm:items-center justify-center">
+          <div className="w-full max-w-md rounded-2xl bg-white border p-4">
+            <p className="text-base font-semibold">Order declined</p>
+            <p className="mt-1 text-sm text-gray-600">Your order was declined. Check reason below.</p>
+            <div className="mt-3 rounded-xl border p-3">
+              <p className="text-xs text-gray-600">Reason</p>
+              <p className="mt-1 text-sm">{rejectedPrompt.reason || "No reason provided."}</p>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className="rounded-xl border px-4 py-3 text-sm"
+                onClick={() => {
+                  if (typeof window !== "undefined") {
+                    window.localStorage.setItem(`dashbuy_seen_reject_${rejectedPrompt.orderId}`, "1");
+                  }
+                  setRejectedPrompt(null);
+                  window.location.href = "/food?tab=restaurants";
+                }}
+              >
+                Check other restaurants
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-black px-4 py-3 text-sm text-white"
+                onClick={() => {
+                  if (typeof window !== "undefined") {
+                    window.localStorage.setItem(`dashbuy_seen_reject_${rejectedPrompt.orderId}`, "1");
+                  }
+                  setRejectedPrompt(null);
+                  window.location.href = "/account/withdraw";
+                }}
+              >
+                Withdraw my funds
+              </button>
+            </div>
+            <button
+              type="button"
+              className="mt-2 w-full rounded-xl border px-4 py-3 text-sm"
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.localStorage.setItem(`dashbuy_seen_reject_${rejectedPrompt.orderId}`, "1");
+                }
+                setRejectedPrompt(null);
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      ) : null}
     </AppShell>
   );
 }

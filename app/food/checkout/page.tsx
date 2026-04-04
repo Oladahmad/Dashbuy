@@ -120,6 +120,8 @@ export default function FoodCheckoutPage() {
   const [locating, setLocating] = useState(false);
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
+  const [payMethod, setPayMethod] = useState<"wallet" | "card">("card");
+  const [walletBalance, setWalletBalance] = useState(0);
 
   const platesSubtotal = useMemo(() => plates.reduce((sum, p) => sum + Number(p.plateTotal), 0), [plates]);
   const combosSubtotal = useMemo(() => combos.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0), [combos]);
@@ -149,6 +151,17 @@ export default function FoodCheckoutPage() {
       if (!userId) {
         router.replace("/auth/login?next=%2Ffood%2Fcheckout");
         return;
+      }
+      const token = sessionData.session?.access_token ?? "";
+      if (token) {
+        const balRes = await fetch("/api/wallet/balance", {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
+        if (balRes.ok && balBody?.ok) {
+          setWalletBalance(Number(balBody.balance ?? 0));
+        }
       }
       setLoading(false);
     })();
@@ -430,6 +443,34 @@ export default function FoodCheckoutPage() {
       }
     }
 
+    if (payMethod === "wallet") {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token ?? "";
+      if (!token) {
+        setLoading(false);
+        router.push("/auth/login?next=%2Ffood%2Fcheckout");
+        return;
+      }
+      const payRes = await fetch("/api/wallet/pay-orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ orderIds: createdOrderIds }),
+      });
+      const payBody = (await payRes.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!payRes.ok || !payBody?.ok) {
+        setLoading(false);
+        setMsg(payBody?.error ?? "Wallet payment failed. You can try card payment.");
+        return;
+      }
+      localStorage.removeItem(FOOD_CART_KEY);
+      setLoading(false);
+      router.push("/food/order-success");
+      return;
+    }
+
     localStorage.removeItem(FOOD_CART_KEY);
     setLoading(false);
     const paymentQuery =
@@ -496,6 +537,43 @@ export default function FoodCheckoutPage() {
         </div>
       </section>
 
+      <section className="mt-4 rounded-2xl border bg-white p-4">
+        <h2 className="font-semibold">Payment method</h2>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            className={`rounded-xl border px-3 py-3 text-sm ${payMethod === "card" ? "bg-black text-white" : "bg-white"}`}
+            onClick={() => setPayMethod("card")}
+          >
+            Card / Paystack
+          </button>
+          <button
+            type="button"
+            className={`rounded-xl border px-3 py-3 text-sm ${payMethod === "wallet" ? "bg-black text-white" : "bg-white"}`}
+            onClick={() => setPayMethod("wallet")}
+          >
+            Wallet
+          </button>
+        </div>
+
+        {payMethod === "wallet" ? (
+          <div className="mt-3 rounded-xl border p-3">
+            <p className="text-xs text-gray-600">Wallet balance</p>
+            <p className="mt-1 text-lg font-semibold">{formatNaira(walletBalance)}</p>
+            {walletBalance < total ? (
+              <p className="mt-2 text-xs text-red-600">Wallet balance is not enough for this order.</p>
+            ) : null}
+            <button
+              type="button"
+              className="mt-2 rounded-xl border px-3 py-2 text-sm"
+              onClick={() => router.push("/account/add-funds")}
+            >
+              Add funds
+            </button>
+          </div>
+        ) : null}
+      </section>
+
       <section className="mt-6 rounded-2xl border bg-white p-4">
         <h2 className="font-semibold">Delivery details</h2>
         <p className="mt-2 text-sm text-gray-600">
@@ -555,8 +633,8 @@ export default function FoodCheckoutPage() {
       </section>
 
       {msg ? <p className="mt-4 text-sm text-red-600">{msg}</p> : null}
-      <button className="mt-6 w-full rounded bg-black px-4 py-3 text-white disabled:opacity-60" onClick={placeOrder} disabled={isEmpty || loading}>
-        Place order (payment next)
+      <button className="mt-6 w-full rounded bg-black px-4 py-3 text-white disabled:opacity-60" onClick={placeOrder} disabled={isEmpty || loading || (payMethod === "wallet" && walletBalance < total)}>
+        {payMethod === "wallet" ? "Pay with wallet" : "Place order (payment next)"}
       </button>
     </main>
   );

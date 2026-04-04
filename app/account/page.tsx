@@ -5,8 +5,6 @@ import AppShell from "@/components/AppShell";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
-import { ensurePushSubscribed, isPushSupported } from "@/lib/pushClient";
-import { parseRejectReason } from "@/lib/orderRejection";
 
 type OrderRow = {
   id: string;
@@ -30,10 +28,6 @@ type OrderGroup = {
   orderName: string;
 };
 
-type WithdrawRequestRow = {
-  amount: number | null;
-  status: string | null;
-};
 
 type ProfileRow = {
   id: string;
@@ -153,23 +147,14 @@ export default function AccountPage() {
   const [address, setAddress] = useState("");
 
   const [saving, setSaving] = useState(false);
-  const [pushBusy, setPushBusy] = useState(false);
-  const [pushMsg, setPushMsg] = useState("");
-  const [pushSupported, setPushSupported] = useState(false);
-
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [orders, setOrders] = useState<OrderGroup[]>([]);
-  const [rejectedAvailable, setRejectedAvailable] = useState(0);
-  const [rejectedPrompt, setRejectedPrompt] = useState<{ orderId: string; reason: string } | null>(null);
+  const [walletBalance, setWalletBalance] = useState(0);
 
   const requiredMissing = useMemo(() => {
     if (!profile) return true;
     return isBlank(profile.full_name) || isBlank(profile.phone) || isBlank(profile.address);
   }, [profile]);
-
-  useEffect(() => {
-    setPushSupported(isPushSupported());
-  }, []);
 
   useEffect(() => {
     (async () => {
@@ -238,41 +223,26 @@ export default function AccountPage() {
         }
         setOrders(groupOrders(rows).slice(0, 3));
 
-        const rejectedRows = rows.filter((r) => {
-          const s = String(r.status ?? "").toLowerCase();
-          return s === "rejected" || s === "declined";
-        });
-        const rejectedTotal = rejectedRows.reduce((sum, r) => sum + Number(r.total ?? 0), 0);
-
-        const { data: reqRows } = await supabase
-          .from("customer_withdraw_requests")
-          .select("amount,status")
-          .eq("customer_id", user.id);
-        const reserved = ((reqRows as WithdrawRequestRow[] | null) ?? [])
-          .filter((r) => ["pending", "approved", "processing"].includes(String(r.status ?? "").toLowerCase()))
-          .reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
-        setRejectedAvailable(Math.max(0, rejectedTotal - reserved));
-
-        const latestDeclined = groupOrders(rows).find((g) => {
-          const s = String(g.status ?? "").toLowerCase();
-          return s === "rejected" || s === "declined";
-        });
-        if (latestDeclined) {
-          const firstReason =
-            latestDeclined.orders
-              .map((x) => parseRejectReason(x.notes))
-              .find((x) => x.length > 0) ?? "No reason provided.";
-          const key = `dashbuy_seen_reject_${latestDeclined.id}`;
-          if (typeof window !== "undefined" && !window.localStorage.getItem(key)) {
-            setRejectedPrompt({ orderId: latestDeclined.id, reason: firstReason });
-          }
-        }
       }
 
       setOrdersLoading(false);
       setLoading(false);
     })();
   }, [router]);
+
+  useEffect(() => {
+    (async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token ?? "";
+      if (!token) return;
+      const res = await fetch("/api/wallet/balance", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = (await res.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
+      if (res.ok && body?.ok) setWalletBalance(Number(body.balance ?? 0));
+    })();
+  }, []);
 
   const canSave = useMemo(() => {
     if (!editing) return false;
@@ -347,52 +317,6 @@ export default function AccountPage() {
     router.push("/auth/login");
   }
 
-  function closeRejectedPrompt() {
-    if (!rejectedPrompt) return;
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(`dashbuy_seen_reject_${rejectedPrompt.orderId}`, "1");
-    }
-    setRejectedPrompt(null);
-  }
-
-  async function enableNotifications() {
-    setPushBusy(true);
-    setPushMsg("");
-    const result = await ensurePushSubscribed({ askPermission: true });
-    if (!result.ok) {
-      setPushMsg(result.error);
-      setPushBusy(false);
-      return;
-    }
-    setPushMsg("Notifications enabled successfully.");
-    setPushBusy(false);
-  }
-
-  async function sendTestNotification() {
-    setPushBusy(true);
-    setPushMsg("");
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-    if (!token) {
-      setPushMsg("Please sign in again.");
-      setPushBusy(false);
-      return;
-    }
-
-    const res = await fetch("/api/push/test", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    if (!res.ok || !body?.ok) {
-      setPushMsg(body?.error ?? "Could not send test notification.");
-      setPushBusy(false);
-      return;
-    }
-
-    setPushMsg("Test notification sent.");
-    setPushBusy(false);
-  }
 
   return (
     <AppShell title="Account">
@@ -556,63 +480,36 @@ export default function AccountPage() {
           </div>
 
           <div className="mt-4 rounded-2xl border bg-white p-5">
-            <p className="text-lg font-semibold">Push notifications</p>
+            <p className="text-lg font-semibold">Wallet balance</p>
             <p className="mt-1 text-sm text-gray-600">
-              Enable app notifications for order updates and announcements.
-            </p>
-
-            {!pushSupported ? (
-              <p className="mt-3 text-sm text-amber-700">This device/browser does not support push notifications.</p>
-            ) : (
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  className="rounded-xl bg-black px-4 py-3 text-sm text-white disabled:opacity-60"
-                  disabled={pushBusy}
-                  onClick={enableNotifications}
-                >
-                  {pushBusy ? "Please wait..." : "Enable notifications"}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-xl border px-4 py-3 text-sm disabled:opacity-60"
-                  disabled={pushBusy}
-                  onClick={sendTestNotification}
-                >
-                  Send test notification
-                </button>
-              </div>
-            )}
-            {pushMsg ? <p className="mt-2 text-sm text-gray-700">{pushMsg}</p> : null}
-          </div>
-
-          <div className="mt-4 rounded-2xl border bg-white p-5">
-            <p className="text-lg font-semibold">Rejected order balance</p>
-            <p className="mt-1 text-sm text-gray-600">
-              Funds from declined orders are tracked here while you decide what to do next.
+              Rejected order refunds and added funds go into one wallet balance.
             </p>
             <div className="mt-3 rounded-xl border p-4">
-              <p className="text-xs text-gray-600">Amount available</p>
-              <p className="mt-1 text-2xl font-semibold">{naira(rejectedAvailable)}</p>
+              <p className="text-xs text-gray-600">Available balance</p>
+              <p className="mt-1 text-2xl font-semibold">{naira(walletBalance)}</p>
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <button
                 className="rounded-xl border px-4 py-3 text-sm"
                 type="button"
-                onClick={() => router.push("/food?tab=restaurants")}
+                onClick={() => router.push("/account/add-funds")}
               >
-                Check other restaurants
+                Add funds
               </button>
               <button
                 className="rounded-xl bg-black px-4 py-3 text-sm text-white"
                 type="button"
                 onClick={() => router.push("/account/withdraw")}
               >
-                Withdraw my funds
+                Withdraw funds
               </button>
             </div>
-            <button className="mt-2 w-full rounded-xl border px-4 py-3 text-sm text-gray-500" type="button" disabled>
-              Add funds (coming soon)
+            <button
+              className="mt-3 w-full rounded-xl border px-4 py-3 text-sm"
+              type="button"
+              onClick={() => router.push("/food?tab=restaurants")}
+            >
+              Check other restaurants
             </button>
           </div>
 
@@ -660,43 +557,6 @@ export default function AccountPage() {
 
           <div className="h-3" />
 
-          {rejectedPrompt ? (
-            <div className="fixed inset-0 z-50 bg-black/45 p-4 flex items-end sm:items-center justify-center">
-              <div className="w-full max-w-md rounded-2xl bg-white border p-4">
-                <p className="text-base font-semibold">Order declined</p>
-                <p className="mt-1 text-sm text-gray-600">Your order was declined. Check reason below.</p>
-                <div className="mt-3 rounded-xl border p-3">
-                  <p className="text-xs text-gray-600">Reason</p>
-                  <p className="mt-1 text-sm">{rejectedPrompt.reason || "No reason provided."}</p>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    className="rounded-xl border px-4 py-3 text-sm"
-                    onClick={() => {
-                      closeRejectedPrompt();
-                      router.push("/food?tab=restaurants");
-                    }}
-                  >
-                    Check other restaurants
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-xl bg-black px-4 py-3 text-sm text-white"
-                    onClick={() => {
-                      closeRejectedPrompt();
-                      router.push("/account/withdraw");
-                    }}
-                  >
-                    Withdraw my funds
-                  </button>
-                </div>
-                <button type="button" className="mt-2 w-full rounded-xl border px-4 py-3 text-sm" onClick={closeRejectedPrompt}>
-                  Close
-                </button>
-              </div>
-            </div>
-          ) : null}
         </>
       )}
     </AppShell>

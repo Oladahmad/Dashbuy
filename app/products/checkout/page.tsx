@@ -86,6 +86,8 @@ export default function ProductCheckoutPage() {
   const [locating, setLocating] = useState(false);
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
+  const [payMethod, setPayMethod] = useState<"wallet" | "card">("card");
+  const [walletBalance, setWalletBalance] = useState(0);
 
   const subtotal = useMemo(
     () => items.reduce((sum, it) => sum + Number(it.price) * Number(it.qty), 0),
@@ -111,6 +113,18 @@ export default function ProductCheckoutPage() {
       if (!userId) {
         router.replace("/auth/login?next=%2Fproducts%2Fcheckout");
         return;
+      }
+
+      const token = sessionData.session?.access_token ?? "";
+      if (token) {
+        const balRes = await fetch("/api/wallet/balance", {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
+        if (balRes.ok && balBody?.ok) {
+          setWalletBalance(Number(balBody.balance ?? 0));
+        }
       }
 
       setLoading(false);
@@ -272,6 +286,34 @@ export default function ProductCheckoutPage() {
       createdOrderIds.push(order.id);
     }
 
+    if (payMethod === "wallet") {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token ?? "";
+      if (!token) {
+        setLoading(false);
+        router.push("/auth/login?next=%2Fproducts%2Fcheckout");
+        return;
+      }
+      const payRes = await fetch("/api/wallet/pay-orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ orderIds: createdOrderIds }),
+      });
+      const payBody = (await payRes.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!payRes.ok || !payBody?.ok) {
+        setLoading(false);
+        setMsg(payBody?.error ?? "Wallet payment failed. You can try card payment.");
+        return;
+      }
+      localStorage.removeItem(CART_KEY);
+      setLoading(false);
+      router.push("/products/success");
+      return;
+    }
+
     localStorage.removeItem(CART_KEY);
     setLoading(false);
 
@@ -333,6 +375,43 @@ export default function ProductCheckoutPage() {
           <span>Total</span>
           <span className="font-semibold">{formatNaira(total)}</span>
         </div>
+      </section>
+
+      <section className="mt-4 rounded-2xl border bg-white p-4">
+        <h2 className="font-semibold">Payment method</h2>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            className={`rounded-xl border px-3 py-3 text-sm ${payMethod === "card" ? "bg-black text-white" : "bg-white"}`}
+            onClick={() => setPayMethod("card")}
+          >
+            Card / Paystack
+          </button>
+          <button
+            type="button"
+            className={`rounded-xl border px-3 py-3 text-sm ${payMethod === "wallet" ? "bg-black text-white" : "bg-white"}`}
+            onClick={() => setPayMethod("wallet")}
+          >
+            Wallet
+          </button>
+        </div>
+
+        {payMethod === "wallet" ? (
+          <div className="mt-3 rounded-xl border p-3">
+            <p className="text-xs text-gray-600">Wallet balance</p>
+            <p className="mt-1 text-lg font-semibold">{formatNaira(walletBalance)}</p>
+            {walletBalance < total ? (
+              <p className="mt-2 text-xs text-red-600">Wallet balance is not enough for this order.</p>
+            ) : null}
+            <button
+              type="button"
+              className="mt-2 rounded-xl border px-3 py-2 text-sm"
+              onClick={() => router.push("/account/add-funds")}
+            >
+              Add funds
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <section className="mt-6 rounded-2xl border bg-white p-4">
@@ -402,9 +481,9 @@ export default function ProductCheckoutPage() {
       <button
         className="mt-6 w-full rounded bg-black px-4 py-3 text-white disabled:opacity-60"
         onClick={placeOrder}
-        disabled={items.length === 0 || loading}
+        disabled={items.length === 0 || loading || (payMethod === "wallet" && walletBalance < total)}
       >
-        Place order (payment next)
+        {payMethod === "wallet" ? "Pay with wallet" : "Place order (payment next)"}
       </button>
     </main>
   );
