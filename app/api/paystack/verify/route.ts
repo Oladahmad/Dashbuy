@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { notifyOrderEvent } from "@/lib/orderNotifications";
+import { squadVerifyTransaction } from "@/lib/squad";
 
 type PaidOrder = {
   id: string;
@@ -27,41 +28,31 @@ export async function POST(req: Request) {
       );
     }
 
-    const secret = process.env.PAYSTACK_SECRET_KEY;
+    const secret = process.env.SQUAD_SECRET_KEY;
     if (!secret) {
       return NextResponse.json(
-        { ok: false, error: "PAYSTACK_SECRET_KEY missing in .env.local" },
+        { ok: false, error: "SQUAD_SECRET_KEY missing in .env.local" },
         { status: 500 }
       );
     }
 
-    const res = await fetch(
-      `https://api.paystack.co/transaction/verify/${reference}`,
-      { headers: { Authorization: `Bearer ${secret}` } }
-    );
+    const verification = await squadVerifyTransaction(reference);
+    const data = verification.json;
 
-    const data = await res.json();
-
-    if (!data?.status) {
+    if (!verification.ok || !data?.success) {
       return NextResponse.json(
         { ok: false, error: data?.message ?? "Verify failed" },
         { status: 400 }
       );
     }
 
-    const paystackStatus = String(data?.data?.status ?? "");
-    const amountKobo = Number(data?.data?.amount ?? 0);
-    const currency = String(data?.data?.currency ?? "");
-    const paidAt = data?.data?.paid_at ?? null;
-    const ref = String(data?.data?.reference ?? reference);
+    const paymentStatus = String(data?.data?.transaction_status ?? "");
+    const amountKobo = Number(data?.data?.transaction_amount ?? 0);
+    const currency = String(data?.data?.transaction_currency_id ?? "NGN");
+    const paidAt = data?.data?.created_at ?? null;
+    const ref = String(data?.data?.transaction_ref ?? reference);
 
-    if (paystackStatus === "success") {
-      const orderIdFromMeta = data?.data?.metadata?.orderId ? String(data.data.metadata.orderId) : null;
-      const orderIdsFromMeta = Array.isArray(data?.data?.metadata?.orderIds)
-        ? data.data.metadata.orderIds.map((id: unknown) => String(id)).filter(Boolean)
-        : [];
-      const fallbackOrderIds = Array.from(new Set(orderIdFromMeta ? [orderIdFromMeta, ...orderIdsFromMeta] : orderIdsFromMeta));
-
+    if (paymentStatus === "success") {
       const updatePayload = {
         status: "pending_vendor",
         paystack_reference: ref,
@@ -82,27 +73,12 @@ export async function POST(req: Request) {
 
       targetOrders = (byRefLookup.data as PaidOrder[] | null) ?? [];
 
-      if (targetOrders.length === 0 && fallbackOrderIds.length > 0) {
-        const byIdLookup = await supabaseAdmin
-          .from("orders")
-          .select(
-            "id,status,vendor_id,customer_id,order_type,food_mode,total,total_amount,delivery_address,customer_phone,created_at"
-          )
-          .in("id", fallbackOrderIds);
-
-        if (byIdLookup.error) {
-          return NextResponse.json({ ok: false, error: "Order lookup error: " + byIdLookup.error.message }, { status: 500 });
-        }
-
-        targetOrders = (byIdLookup.data as PaidOrder[] | null) ?? [];
-      }
-
       if (targetOrders.length === 0) {
         return NextResponse.json(
           {
             ok: false,
             error:
-              "Order not found for this payment. Ensure paystack_reference is saved on orders during initialize, or metadata.orderId exists.",
+              "Order not found for this payment reference.",
           },
           { status: 404 }
         );
@@ -153,7 +129,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         ok: true,
-        status: paystackStatus,
+        status: paymentStatus,
         amount: amountKobo,
         currency,
         paidAt,
@@ -165,7 +141,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      status: paystackStatus,
+      status: paymentStatus,
       amount: amountKobo,
       currency,
       paidAt,

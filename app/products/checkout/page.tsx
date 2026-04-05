@@ -187,11 +187,11 @@ export default function ProductCheckoutPage() {
     }
 
     const addr = deliveryAddress.trim();
-    if (!addr && !geoPoint) {
-      setMsg("Enter delivery address or extract your location before placing order.");
+    if (!addr) {
+      setMsg("Enter your delivery address before continuing.");
       return;
     }
-    if (addr && addr.length < 10) {
+    if (addr.length < 10) {
       setMsg("Please include good address details for fast delivery, for example house number, street, area, landmark.");
       return;
     }
@@ -377,6 +377,68 @@ export default function ProductCheckoutPage() {
         </div>
       </section>
 
+      <section className="mt-6 rounded-2xl border bg-white p-4">
+        <h2 className="font-semibold">Delivery details</h2>
+
+        <p className="mt-2 text-sm text-gray-600">
+          Enter the full delivery address. If you are already at the delivery point, capture your current location to help logistics find you faster.
+        </p>
+
+        <div className="mt-4 grid gap-3">
+          <div>
+            <label className="text-sm font-medium">Delivery address</label>
+            <div className="mt-1 overflow-hidden rounded-xl border">
+              <textarea
+                className="w-full border-0 p-3 focus:outline-none"
+                rows={3}
+                placeholder="House number, street, area, landmark"
+                value={deliveryAddress}
+                onChange={(e) => setDeliveryAddress(e.target.value)}
+              />
+              <div className="flex items-center justify-between border-t bg-gray-50 px-3 py-2">
+                <button
+                  type="button"
+                  className="rounded-lg border bg-white px-3 py-2 text-sm"
+                  onClick={captureGeoPoint}
+                  disabled={locating}
+                >
+                  {locating ? "Capturing..." : "Capture location"}
+                </button>
+                {geoPoint ? (
+                  <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    Location captured
+                  </span>
+                ) : (
+                  <span className="text-xs text-gray-500">Optional but recommended</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium">Phone number</label>
+            <input
+              className="mt-1 w-full rounded border p-2"
+              placeholder="080..."
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium">Note</label>
+            <textarea
+              className="mt-1 w-full rounded border p-2"
+              rows={3}
+              placeholder="Optional, for example call on arrival, gate code, directions"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+        </div>
+      </section>
+
       <section className="mt-4 rounded-2xl border bg-white p-4">
         <h2 className="font-semibold">Payment method</h2>
         <div className="mt-3 grid grid-cols-2 gap-2">
@@ -385,7 +447,7 @@ export default function ProductCheckoutPage() {
             className={`rounded-xl border px-3 py-3 text-sm ${payMethod === "card" ? "bg-black text-white" : "bg-white"}`}
             onClick={() => setPayMethod("card")}
           >
-            Card / Paystack
+            Payment gateway
           </button>
           <button
             type="button"
@@ -414,68 +476,6 @@ export default function ProductCheckoutPage() {
         ) : null}
       </section>
 
-      <section className="mt-6 rounded-2xl border bg-white p-4">
-        <h2 className="font-semibold">Delivery details</h2>
-
-        <p className="mt-2 text-sm text-gray-600">
-          Do not use location capture if you are not within the delivery area. Enter your delivery address and capture your exact location.
-        </p>
-
-        <div className="mt-4 grid gap-3">
-          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
-            <label className="text-sm font-medium text-blue-900">Exact geopoint</label>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className="rounded border border-blue-300 bg-white px-3 py-2 text-sm text-blue-900"
-                onClick={captureGeoPoint}
-                disabled={locating}
-              >
-                {locating ? "Extracting location..." : "Use my current location"}
-              </button>
-              {geoPoint ? (
-                <span className="inline-flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-sm text-emerald-800">
-                  <span className="h-2 w-2 rounded-full bg-emerald-600" />
-                  Location extracted
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Delivery address</label>
-            <textarea
-              className="mt-1 w-full rounded border p-2"
-              rows={3}
-              placeholder="House number, street, area, landmark"
-              value={deliveryAddress}
-              onChange={(e) => setDeliveryAddress(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Phone number</label>
-            <input
-              className="mt-1 w-full rounded border p-2"
-              placeholder="080..."
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Note</label>
-            <textarea
-              className="mt-1 w-full rounded border p-2"
-              rows={3}
-              placeholder="Optional, for example call on arrival, gate code, directions"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-          </div>
-        </div>
-      </section>
-
       {msg ? <p className="mt-4 text-sm text-red-600">{msg}</p> : null}
 
       <button
@@ -483,7 +483,7 @@ export default function ProductCheckoutPage() {
         onClick={placeOrder}
         disabled={items.length === 0 || loading || (payMethod === "wallet" && walletBalance < total)}
       >
-        {payMethod === "wallet" ? "Pay with wallet" : "Place order (payment next)"}
+        {payMethod === "wallet" ? "Continue with wallet" : "Continue to payment gateway"}
       </button>
     </main>
   );

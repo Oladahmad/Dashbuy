@@ -18,6 +18,9 @@ export default function AddFundsPage() {
   const [checking, setChecking] = useState(false);
   const [dva, setDva] = useState<{ account_number: string; account_name: string; bank_name: string; amount: number } | null>(null);
   const [balanceStart, setBalanceStart] = useState(0);
+  const [balance, setBalance] = useState<number | null>(null);
+  const [balanceErr, setBalanceErr] = useState("");
+  const [lastChecked, setLastChecked] = useState("");
   const startedRef = useRef(false);
 
   useEffect(() => {
@@ -32,7 +35,14 @@ export default function AddFundsPage() {
           headers: { Authorization: `Bearer ${token}` },
         });
         const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
-        if (balRes.ok && balBody?.ok) setBalanceStart(Number(balBody.balance ?? 0));
+        if (balRes.ok && balBody?.ok) {
+          const next = Number(balBody.balance ?? 0);
+          setBalanceStart(next);
+          setBalance(next);
+          setBalanceErr("");
+        } else {
+          setBalanceErr("Unable to load wallet balance.");
+        }
       }
     })();
   }, []);
@@ -98,11 +108,16 @@ export default function AddFundsPage() {
       const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
       if (balRes.ok && balBody?.ok) {
         const next = Number(balBody.balance ?? 0);
+        setBalance(next);
+        setBalanceErr("");
+        setLastChecked(new Date().toLocaleTimeString());
         if (next > balanceStart) {
           clearInterval(timer);
           setMsg("Wallet funded successfully. Redirecting...");
           setTimeout(() => router.push("/account"), 1000);
         }
+      } else {
+        setBalanceErr("Unable to load wallet balance.");
       }
     }, 6000);
     return () => clearInterval(timer);
@@ -126,15 +141,21 @@ export default function AddFundsPage() {
     const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
     if (balRes.ok && balBody?.ok) {
       const next = Number(balBody.balance ?? 0);
+      setBalance(next);
+      setBalanceErr("");
+      setLastChecked(new Date().toLocaleTimeString());
       if (next > balanceStart) {
         setMsg("Wallet funded successfully. Redirecting...");
         setTimeout(() => router.push("/account"), 1000);
         return;
       }
-      setMsg("We’re still waiting for confirmation. It can take a few minutes after transfer.");
+      setMsg("We're still waiting for confirmation. It can take a few minutes after transfer.");
+    } else {
+      setBalanceErr("Unable to load wallet balance.");
     }
     setChecking(false);
   }
+
 
   return (
     <AppShell title="Add funds">
@@ -142,6 +163,11 @@ export default function AddFundsPage() {
         <p className="text-sm text-gray-600">Wallet top up</p>
         <p className="text-base font-semibold">Add funds to your Dashbuy wallet</p>
         <p className="mt-1 text-sm text-gray-600">Pay by bank transfer using a dedicated virtual account.</p>
+        <div className="mt-3 rounded-xl border bg-gray-50 p-3">
+          <p className="text-xs text-gray-600">Current wallet balance</p>
+          <p className="mt-1 text-lg font-semibold">{balance == null ? "Loading..." : naira(balance)}</p>
+          {balanceErr ? <p className="mt-1 text-xs text-red-600">{balanceErr}</p> : null}
+        </div>
       </div>
 
       <div className="mt-4 rounded-2xl border bg-white p-5 space-y-3">
@@ -194,8 +220,15 @@ export default function AddFundsPage() {
               onClick={manualCheckBalance}
               disabled={checking}
             >
-              {checking ? "Checking payment..." : "I’ve sent the money"}
+              {checking ? "Checking payment..." : "I've sent the money"}
             </button>
+            <div className="rounded-xl border bg-gray-50 p-3 text-xs text-gray-600">
+              {lastChecked ? (
+                <p>Last checked: {lastChecked}. Waiting for payment confirmation...</p>
+              ) : (
+                <p>Waiting for payment confirmation...</p>
+              )}
+            </div>
           </div>
         ) : null}
 
@@ -216,3 +249,4 @@ export default function AddFundsPage() {
     </AppShell>
   );
 }
+

@@ -1,12 +1,11 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 function PayCallbackPageInner() {
   const sp = useSearchParams();
   const router = useRouter();
-
   const [msg, setMsg] = useState("Verifying payment...");
   const startedRef = useRef(false);
 
@@ -15,10 +14,10 @@ function PayCallbackPageInner() {
       if (startedRef.current) return;
       startedRef.current = true;
 
-      const reference = sp.get("reference");
+      const reference = sp.get("transaction_ref") || sp.get("reference");
 
       if (!reference) {
-        setMsg("Missing Paystack reference. Payment cannot be verified.");
+        setMsg("Missing payment reference. Payment cannot be verified.");
         return;
       }
 
@@ -30,27 +29,24 @@ function PayCallbackPageInner() {
         });
 
         const json = await resp.json();
-
         if (!resp.ok || !json?.ok) {
           setMsg(json?.error ?? "Verification failed");
           return;
         }
 
-        setMsg("Payment verified ✅ Redirecting...");
-
-        // Always redirect to a safe page
+        setMsg("Payment verified. Redirecting...");
         router.replace("/");
       } catch (e: unknown) {
         const m = e instanceof Error ? e.message : "Network error";
         setMsg(m);
       }
     })();
-  }, [sp, router]);
+  }, [router, sp]);
 
   return (
-    <main className="min-h-screen bg-white flex items-center justify-center p-6">
+    <main className="flex min-h-screen items-center justify-center bg-white p-6">
       <div className="w-full max-w-md rounded-2xl border bg-white p-6">
-        <p className="text-sm text-gray-600">Paystack</p>
+        <p className="text-sm text-gray-600">Dashbuy payment</p>
         <p className="mt-1 text-lg">{msg}</p>
       </div>
     </main>
@@ -59,7 +55,16 @@ function PayCallbackPageInner() {
 
 export default function PayCallbackPage() {
   return (
-    <Suspense fallback={<main className="min-h-screen bg-white flex items-center justify-center p-6"><div className="w-full max-w-md rounded-2xl border bg-white p-6"><p className="text-sm text-gray-600">Paystack</p><p className="mt-1 text-lg">Verifying payment...</p></div></main>}>
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-white p-6">
+          <div className="w-full max-w-md rounded-2xl border bg-white p-6">
+            <p className="text-sm text-gray-600">Dashbuy payment</p>
+            <p className="mt-1 text-lg">Verifying payment...</p>
+          </div>
+        </main>
+      }
+    >
       <PayCallbackPageInner />
     </Suspense>
   );

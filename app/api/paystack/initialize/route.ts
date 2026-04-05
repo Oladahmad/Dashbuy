@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { parseErrandQuote } from "@/lib/errandQuote";
+import { squadInitiatePayment } from "@/lib/squad";
 
 type Body = {
   orderId?: string;
@@ -49,9 +50,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Missing orderId or email" }, { status: 400 });
     }
 
-    const secret = process.env.PAYSTACK_SECRET_KEY;
-    if (!secret) {
-      return NextResponse.json({ ok: false, error: "PAYSTACK_SECRET_KEY missing in env" }, { status: 500 });
+    const squadSecret = process.env.SQUAD_SECRET_KEY;
+    if (!squadSecret) {
+      return NextResponse.json({ ok: false, error: "SQUAD_SECRET_KEY missing in env" }, { status: 500 });
     }
 
     const { data: orders, error: orderErr } = await supabaseAdmin
@@ -131,30 +132,36 @@ export async function POST(req: Request) {
       }
     }
 
-    const resp = await fetch("https://api.paystack.co/transaction/initialize", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${secret}`,
-        "Content-Type": "application/json",
+    const customerId = customerIds[0];
+    let customerName = "";
+    if (customerId) {
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("name")
+        .eq("id", customerId)
+        .maybeSingle();
+      customerName = asText(profile?.name).trim();
+    }
+
+    const squad = await squadInitiatePayment({
+      amountKobo,
+      email,
+      transactionRef: reference,
+      callbackUrl,
+      customerName,
+      paymentChannels: ["card", "bank", "transfer", "ussd"],
+      metadata: {
+        orderId: requestedOrderIds[0],
+        orderIds: requestedOrderIds,
+        type: "orders",
       },
-      body: JSON.stringify({
-        email,
-        amount: amountKobo,
-        reference,
-        callback_url: callbackUrl,
-        metadata: {
-          orderId: requestedOrderIds[0],
-          orderIds: requestedOrderIds,
-          type: "orders",
-        },
-      }),
     });
 
-    const json = await resp.json();
+    const json = squad.json;
 
-    if (!resp.ok || !json?.status) {
+    if (!squad.ok || !json?.data?.checkout_url) {
       return NextResponse.json(
-        { ok: false, error: json?.message ?? "Paystack init failed", raw: json },
+        { ok: false, error: json?.message ?? "Squad init failed", raw: json },
         { status: 400 }
       );
     }
@@ -172,7 +179,7 @@ export async function POST(req: Request) {
     if ((existingPayments.data ?? []).length === 0) {
       const { error: payErr } = await supabaseAdmin.from("payments").insert({
         order_id: requestedOrderIds[0],
-        provider: "paystack",
+        provider: "squad",
         reference,
         amount: totalNaira,
         currency: "NGN",
@@ -186,7 +193,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      authorization_url: json.data.authorization_url,
+      authorization_url: json.data.checkout_url,
       reference,
     });
   } catch (e: unknown) {
