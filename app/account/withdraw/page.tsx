@@ -74,7 +74,7 @@ export default function AccountWithdrawPage() {
   return (
     <AppShell title="Withdraw funds">
       <div className="rounded-2xl border bg-white p-5">
-        <p className="text-sm text-gray-600">Rejected order funds</p>
+        <p className="text-sm text-gray-600">Wallet balance</p>
         <p className="text-base font-semibold">Request withdrawal</p>
         <p className="mt-1 text-sm text-gray-600">
           Submit your bank details and amount. We will process and notify you.

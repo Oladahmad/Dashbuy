@@ -31,48 +31,63 @@ export async function creditWalletTransaction({
   amount,
   reference,
   provider,
+  type = "topup",
 }: {
   customerId: string;
   amount: number;
   reference: string;
   provider: string;
+  type?: string;
 }): Promise<VerifyResult> {
-  const a = adminClient();
+  try {
+    const a = adminClient();
 
-  const { data: existing } = await a
+    const { data: existing, error: existingErr } = await a
     .from("wallet_transactions")
     .select("id,status")
     .eq("reference", reference)
     .maybeSingle<{ id: string; status: string | null }>();
+    if (existingErr) return { ok: false, error: existingErr.message };
 
-  if (existing && (existing.status ?? "").toLowerCase() === "success") {
-    return { ok: true, already: true };
+    if (existing && (existing.status ?? "").toLowerCase() === "success") {
+      return { ok: true, already: true };
+    }
+
+    if (!existing) {
+      const { error: insertErr } = await a.from("wallet_transactions").insert({
+        customer_id: customerId,
+        amount,
+        reference,
+        provider,
+        type,
+        status: "success",
+      });
+      if (insertErr) return { ok: false, error: insertErr.message };
+    } else {
+      const { error: updateTxErr } = await a
+        .from("wallet_transactions")
+        .update({ status: "success", provider, type })
+        .eq("reference", reference);
+      if (updateTxErr) return { ok: false, error: updateTxErr.message };
+    }
+
+    const { data: walletRow, error: walletErr } = await a
+      .from("customer_wallets")
+      .select("balance")
+      .eq("customer_id", customerId)
+      .maybeSingle<{ balance: number | null }>();
+    if (walletErr) return { ok: false, error: walletErr.message };
+
+    const current = Number(walletRow?.balance ?? 0);
+    const next = current + Number(amount || 0);
+
+    const { error: walletUpsertErr } = await a
+      .from("customer_wallets")
+      .upsert({ customer_id: customerId, balance: next }, { onConflict: "customer_id" });
+    if (walletUpsertErr) return { ok: false, error: walletUpsertErr.message };
+
+    return { ok: true };
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : "Wallet credit failed" };
   }
-
-  if (!existing) {
-    await a.from("wallet_transactions").insert({
-      customer_id: customerId,
-      amount,
-      reference,
-      provider,
-      type: "topup",
-      status: "success",
-    });
-  } else {
-    await a.from("wallet_transactions").update({ status: "success" }).eq("reference", reference);
-  }
-
-  const { data: walletRow } = await a
-    .from("customer_wallets")
-    .select("balance")
-    .eq("customer_id", customerId)
-    .maybeSingle<{ balance: number | null }>();
-  const current = Number(walletRow?.balance ?? 0);
-  const next = current + Number(amount || 0);
-
-  await a
-    .from("customer_wallets")
-    .upsert({ customer_id: customerId, balance: next }, { onConflict: "customer_id" });
-
-  return { ok: true };
 }

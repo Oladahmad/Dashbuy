@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { notifyOrderEvent } from "@/lib/orderNotifications";
 import { appendRejectReason } from "@/lib/orderRejection";
+import { creditWalletTransaction } from "@/lib/walletCredit";
 
 type RejectBody = {
   orderId?: string;
@@ -14,11 +15,26 @@ type OrderMini = {
   customer_id: string;
   order_type: string | null;
   food_mode: string | null;
+  subtotal: number | null;
+  delivery_fee: number | null;
   total: number | null;
   total_amount: number | null;
   status: string | null;
   notes: string | null;
 };
+
+function moneyValue(x: unknown) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function orderAmount(order: Pick<OrderMini, "subtotal" | "delivery_fee" | "total" | "total_amount">) {
+  const totalAmount = moneyValue(order.total_amount);
+  if (totalAmount > 0) return totalAmount;
+  const total = moneyValue(order.total);
+  if (total > 0) return total;
+  return moneyValue(order.subtotal) + moneyValue(order.delivery_fee);
+}
 
 function adminClient() {
   const url = process.env.SUPABASE_URL;
@@ -73,7 +89,7 @@ export async function POST(req: Request) {
 
     const { data: order, error: orderErr } = await a
       .from("orders")
-      .select("id,vendor_id,customer_id,order_type,food_mode,total,total_amount,status,notes")
+      .select("id,vendor_id,customer_id,order_type,food_mode,subtotal,delivery_fee,total,total_amount,status,notes")
       .eq("id", orderId)
       .maybeSingle<OrderMini>();
 
@@ -96,12 +112,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Update order error: " + updErr.message }, { status: 500 });
     }
 
+    const refundAmount = orderAmount(order);
+    if (refundAmount > 0) {
+      const refundReference = `wallet_reject_${order.id}`;
+      const creditResult = await creditWalletTransaction({
+        customerId: order.customer_id,
+        amount: refundAmount,
+        reference: refundReference,
+        provider: "dashbuy",
+        type: "rejected_refund",
+      });
+      if (!creditResult.ok) {
+        return NextResponse.json({ ok: false, error: creditResult.error ?? "Unable to credit wallet refund." }, { status: 500 });
+      }
+    }
+
     await notifyOrderEvent({
       event: "vendor_rejected",
       orderId: order.id,
       vendorId,
       customerId: order.customer_id,
-      amountNaira: order.total_amount ?? order.total,
+      amountNaira: orderAmount(order),
       orderType: order.order_type,
     });
 
@@ -111,4 +142,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
-

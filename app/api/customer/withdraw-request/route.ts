@@ -9,11 +9,6 @@ type Body = {
   note?: string;
 };
 
-type OrderRow = {
-  total: number | null;
-  status: string | null;
-};
-
 type ReqRow = {
   amount: number | null;
   status: string | null;
@@ -90,15 +85,12 @@ export async function POST(req: Request) {
       .eq("id", customerId)
       .maybeSingle<{ id: string; full_name: string | null; phone: string | null }>();
 
-    const { data: rejectedOrders } = await a
-      .from("orders")
-      .select("total,status")
+    const { data: walletRow } = await a
+      .from("customer_wallets")
+      .select("balance")
       .eq("customer_id", customerId)
-      .in("status", ["rejected", "declined"]);
-    const rejectedTotal = ((rejectedOrders as OrderRow[] | null) ?? []).reduce(
-      (sum, row) => sum + Number(row.total ?? 0),
-      0
-    );
+      .maybeSingle<{ balance: number | null }>();
+    const walletBalance = Number(walletRow?.balance ?? 0);
 
     const { data: reqRows } = await a
       .from("customer_withdraw_requests")
@@ -107,11 +99,11 @@ export async function POST(req: Request) {
     const reserved = ((reqRows as ReqRow[] | null) ?? [])
       .filter((r) => ["pending", "approved", "processing"].includes(String(r.status ?? "").toLowerCase()))
       .reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
-    const available = Math.max(0, rejectedTotal - reserved);
+    const available = Math.max(0, walletBalance - reserved);
 
     if (amount > available) {
       return NextResponse.json(
-        { ok: false, error: `Amount is above your available rejected-order balance (${formatNaira(available)}).` },
+        { ok: false, error: `Amount is above your available wallet balance (${formatNaira(available)}).` },
         { status: 400 }
       );
     }
@@ -184,4 +176,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
-

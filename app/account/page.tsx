@@ -152,6 +152,7 @@ export default function AccountPage() {
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [orders, setOrders] = useState<OrderGroup[]>([]);
   const [walletBalance, setWalletBalance] = useState(0);
+  const [walletRefreshing, setWalletRefreshing] = useState(false);
 
   const requiredMissing = useMemo(() => {
     if (!profile) return true;
@@ -230,18 +231,25 @@ export default function AccountPage() {
     })();
   }, [router]);
 
+  async function loadWalletBalance(showBusy = false) {
+    if (showBusy) setWalletRefreshing(true);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token ?? "";
+    if (!token) {
+      if (showBusy) setWalletRefreshing(false);
+      return;
+    }
+    const res = await fetch("/api/wallet/balance", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
+    if (res.ok && body?.ok) setWalletBalance(Number(body.balance ?? 0));
+    if (showBusy) setWalletRefreshing(false);
+  }
+
   useEffect(() => {
-    (async () => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token ?? "";
-      if (!token) return;
-      const res = await fetch("/api/wallet/balance", {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const body = (await res.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
-      if (res.ok && body?.ok) setWalletBalance(Number(body.balance ?? 0));
-    })();
+    loadWalletBalance();
   }, []);
 
   useEffect(() => {
@@ -479,16 +487,26 @@ export default function AccountPage() {
                     <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Available balance</p>
                     <p className="mt-2 text-3xl font-semibold text-gray-900">{naira(walletBalance)}</p>
                   </div>
-                  <button
-                    className={`rounded-full px-3 py-1.5 text-xs font-medium text-white ${pinEnabled ? "bg-black" : "bg-black"}`}
-                    type="button"
-                    onClick={() => {
-                      setSettingPin(true);
-                      setPinMsg("");
-                    }}
-                  >
-                    {pinEnabled ? "Reset PIN" : "Set PIN"}
-                  </button>
+                  <div className="flex flex-col items-end gap-2">
+                    <button
+                      className="rounded-full border bg-white px-3 py-1.5 text-xs font-medium text-gray-700"
+                      type="button"
+                      onClick={() => loadWalletBalance(true)}
+                      disabled={walletRefreshing}
+                    >
+                      {walletRefreshing ? "Refreshing..." : "Refresh"}
+                    </button>
+                    <button
+                      className="rounded-full bg-black px-3 py-1.5 text-xs font-medium text-white"
+                      type="button"
+                      onClick={() => {
+                        setSettingPin(true);
+                        setPinMsg("");
+                      }}
+                    >
+                      {pinEnabled ? "Reset PIN" : "Set PIN"}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -587,6 +605,14 @@ export default function AccountPage() {
                   Withdraw funds
                 </button>
               </div>
+
+              <button
+                className="mt-3 w-full rounded-2xl border px-4 py-3 text-center text-sm font-medium"
+                type="button"
+                onClick={() => router.push("/account/wallet-history")}
+              >
+                Wallet history
+              </button>
             </div>
 
             <div className="rounded-3xl border bg-white p-5 shadow-sm">
