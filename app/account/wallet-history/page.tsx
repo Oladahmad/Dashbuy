@@ -56,6 +56,7 @@ function WalletHistoryPageContent() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [items, setItems] = useState<WalletHistoryItem[]>([]);
+  const [balance, setBalance] = useState(0);
 
   const filter = useMemo(() => {
     const value = String(searchParams.get("filter") ?? "all").trim().toLowerCase();
@@ -75,6 +76,15 @@ function WalletHistoryPageContent() {
       if (!token) {
         router.replace("/auth/login?next=%2Faccount%2Fwallet-history");
         return;
+      }
+
+      const balRes = await fetch("/api/wallet/balance", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
+      if (balRes.ok && balBody?.ok) {
+        setBalance(Number(balBody.balance ?? 0));
       }
 
       const res = await fetch(`/api/wallet/history?filter=${encodeURIComponent(filter)}`, {
@@ -112,9 +122,14 @@ function WalletHistoryPageContent() {
         </div>
 
         <div className="mt-4">
+          <div className="rounded-2xl border bg-gray-50 p-4">
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Current balance</p>
+            <p className="mt-2 text-2xl font-semibold text-gray-900">{naira(balance)}</p>
+          </div>
+
           <label className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Filter</label>
           <select
-            className="mt-2 w-full rounded-2xl border bg-white px-4 py-3 text-sm font-medium"
+            className="mt-3 w-full rounded-2xl border bg-white px-4 py-3 text-sm font-medium"
             value={filter}
             onChange={(e) => setFilter(e.target.value as "all" | "bank_funding" | "rejected" | "spent" | "withdrawal")}
           >

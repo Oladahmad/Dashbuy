@@ -82,7 +82,15 @@ export async function GET(req: Request) {
       created_at: String(row.created_at ?? ""),
       updated_at: row.updated_at == null ? null : String(row.updated_at),
       source: "wallet_transaction",
-    }));
+    }))
+      .filter((row) => {
+        const type = String(row.type ?? "");
+        const status = String(row.status ?? "").toLowerCase();
+        if (type === "topup" || type === "payment" || type === "rejected_refund") {
+          return status === "success";
+        }
+        return true;
+      });
 
     let syntheticRejectedItems: Array<Record<string, unknown>> = [];
     if (filter === "all" || filter === "rejected") {
@@ -133,7 +141,11 @@ export async function GET(req: Request) {
         created_at: String(row.created_at ?? ""),
         updated_at: row.updated_at == null ? null : String(row.updated_at),
         source: "withdraw_request",
-      }));
+      }))
+        .filter((row) => {
+          const status = String(row.status ?? "").toLowerCase();
+          return ["approved", "processing", "paid", "success", "completed"].includes(status);
+        });
     }
 
     const items = [...walletItems, ...syntheticRejectedItems, ...withdrawalItems].sort((a, b) =>
