@@ -56,7 +56,6 @@ function WalletHistoryPageContent() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [items, setItems] = useState<WalletHistoryItem[]>([]);
-  const [balance, setBalance] = useState(0);
 
   const filter = useMemo(() => {
     const value = String(searchParams.get("filter") ?? "all").trim().toLowerCase();
@@ -67,6 +66,14 @@ function WalletHistoryPageContent() {
     return "all";
   }, [searchParams]);
 
+  const balance = useMemo(() => {
+    return items.reduce((sum, item) => {
+      const amount = Number(item.amount ?? 0);
+      if (item.type === "payment" || item.type === "withdrawal_request") return sum - amount;
+      return sum + amount;
+    }, 0);
+  }, [items]);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -76,15 +83,6 @@ function WalletHistoryPageContent() {
       if (!token) {
         router.replace("/auth/login?next=%2Faccount%2Fwallet-history");
         return;
-      }
-
-      const balRes = await fetch("/api/wallet/balance", {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
-      if (balRes.ok && balBody?.ok) {
-        setBalance(Number(balBody.balance ?? 0));
       }
 
       const res = await fetch(`/api/wallet/history?filter=${encodeURIComponent(filter)}`, {
