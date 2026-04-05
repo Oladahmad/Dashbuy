@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import { supabase } from "@/lib/supabaseClient";
@@ -15,34 +15,29 @@ export default function AddFundsPage() {
   const [amount, setAmount] = useState("");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [dva, setDva] = useState<{ account_number: string; account_name: string; bank_name: string; amount: number } | null>(null);
-  const [balanceStart, setBalanceStart] = useState(0);
+  const [checkoutUrl, setCheckoutUrl] = useState("");
   const [balance, setBalance] = useState<number | null>(null);
   const [balanceErr, setBalanceErr] = useState("");
-  const [lastChecked, setLastChecked] = useState("");
-  const startedRef = useRef(false);
 
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
       if (user?.email) setEmail(user.email);
+
       const token = data.session?.access_token ?? "";
-      if (token) {
-        const balRes = await fetch("/api/wallet/balance", {
-          method: "GET",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
-        if (balRes.ok && balBody?.ok) {
-          const next = Number(balBody.balance ?? 0);
-          setBalanceStart(next);
-          setBalance(next);
-          setBalanceErr("");
-        } else {
-          setBalanceErr("Unable to load wallet balance.");
-        }
+      if (!token) return;
+
+      const balRes = await fetch("/api/wallet/balance", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
+      if (balRes.ok && balBody?.ok) {
+        setBalance(Number(balBody.balance ?? 0));
+        setBalanceErr("");
+      } else {
+        setBalanceErr("Unable to load wallet balance.");
       }
     })();
   }, []);
@@ -54,11 +49,12 @@ export default function AddFundsPage() {
 
   async function startPayment() {
     setMsg("");
-    if (!canPay) return;
+    if (!canPay || loading) return;
     setLoading(true);
 
     const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token ?? "";
+    const session = sessionData.session;
+    const token = session?.access_token ?? "";
     if (!token) {
       setLoading(false);
       setMsg("Please sign in again to continue.");
@@ -66,103 +62,39 @@ export default function AddFundsPage() {
       return;
     }
 
-    const res = await fetch("/api/paystack/dva/wallet-init", {
+    const res = await fetch("/api/wallet/init", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ amount: Number(amount) }),
+      body: JSON.stringify({
+        amount: Number(amount),
+        email,
+      }),
     });
 
     const body = (await res.json().catch(() => null)) as
-      | { ok?: boolean; error?: string; account_number?: string; account_name?: string; bank_name?: string; amount?: number }
+      | { ok?: boolean; error?: string; authorization_url?: string }
       | null;
-    if (!res.ok || !body?.ok || !body.account_number) {
+
+    if (!res.ok || !body?.ok || !body.authorization_url) {
       setLoading(false);
-      setMsg(body?.error ?? "Unable to create transfer account.");
+      setMsg(body?.error ?? "Unable to start wallet funding.");
       return;
     }
 
-    setDva({
-      account_number: body.account_number,
-      account_name: body.account_name ?? "",
-      bank_name: body.bank_name ?? "",
-      amount: Number(body.amount ?? 0),
-    });
-    setMsg("Transfer to the account below to fund your wallet.");
-    setLoading(false);
+    setCheckoutUrl(body.authorization_url);
+    setMsg("Redirecting to payment gateway...");
+    window.location.href = body.authorization_url;
   }
-
-  useEffect(() => {
-    if (!dva || startedRef.current) return;
-    startedRef.current = true;
-    const timer = setInterval(async () => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token ?? "";
-      if (!token) return;
-      const balRes = await fetch("/api/wallet/balance", {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
-      if (balRes.ok && balBody?.ok) {
-        const next = Number(balBody.balance ?? 0);
-        setBalance(next);
-        setBalanceErr("");
-        setLastChecked(new Date().toLocaleTimeString());
-        if (next > balanceStart) {
-          clearInterval(timer);
-          setMsg("Wallet funded successfully. Redirecting...");
-          setTimeout(() => router.push("/account"), 1000);
-        }
-      } else {
-        setBalanceErr("Unable to load wallet balance.");
-      }
-    }, 6000);
-    return () => clearInterval(timer);
-  }, [dva, balanceStart, router]);
-
-  async function manualCheckBalance() {
-    if (checking) return;
-    setChecking(true);
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token ?? "";
-    if (!token) {
-      setChecking(false);
-      setMsg("Please sign in again to continue.");
-      router.push("/auth/login");
-      return;
-    }
-    const balRes = await fetch("/api/wallet/balance", {
-      method: "GET",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
-    if (balRes.ok && balBody?.ok) {
-      const next = Number(balBody.balance ?? 0);
-      setBalance(next);
-      setBalanceErr("");
-      setLastChecked(new Date().toLocaleTimeString());
-      if (next > balanceStart) {
-        setMsg("Wallet funded successfully. Redirecting...");
-        setTimeout(() => router.push("/account"), 1000);
-        return;
-      }
-      setMsg("We're still waiting for confirmation. It can take a few minutes after transfer.");
-    } else {
-      setBalanceErr("Unable to load wallet balance.");
-    }
-    setChecking(false);
-  }
-
 
   return (
     <AppShell title="Add funds">
       <div className="rounded-2xl border bg-white p-5">
         <p className="text-sm text-gray-600">Wallet top up</p>
         <p className="text-base font-semibold">Add funds to your Dashbuy wallet</p>
-        <p className="mt-1 text-sm text-gray-600">Pay by bank transfer using a dedicated virtual account.</p>
+        <p className="mt-1 text-sm text-gray-600">Fund your wallet using the payment gateway.</p>
         <div className="mt-3 rounded-xl border bg-gray-50 p-3">
           <p className="text-xs text-gray-600">Current wallet balance</p>
           <p className="mt-1 text-lg font-semibold">{balance == null ? "Loading..." : naira(balance)}</p>
@@ -180,6 +112,7 @@ export default function AddFundsPage() {
             placeholder="you@example.com"
           />
         </div>
+
         <div>
           <label className="text-sm font-medium">Amount</label>
           <input
@@ -194,59 +127,29 @@ export default function AddFundsPage() {
 
         {msg ? <p className="text-sm text-orange-600">{msg}</p> : null}
 
-        {dva ? (
-          <div className="rounded-2xl border bg-white p-4 space-y-2">
-            <div>
-              <p className="text-xs text-gray-600">Bank</p>
-              <p className="text-base font-semibold">{dva.bank_name}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-600">Account number</p>
-              <p className="text-base font-semibold">{dva.account_number}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-600">Account name</p>
-              <p className="text-base font-semibold">{dva.account_name}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-600">Amount</p>
-              <p className="text-lg font-bold">N{Math.round(dva.amount).toLocaleString()}</p>
-            </div>
-            <p className="text-xs text-gray-500">Transfer to this account. Your wallet will update automatically.</p>
-            <p className="text-xs text-gray-500">Please send the exact amount. Wrong amounts may delay confirmation.</p>
-            <button
-              type="button"
-              className="w-full rounded-xl border px-4 py-3 text-sm"
-              onClick={manualCheckBalance}
-              disabled={checking}
-            >
-              {checking ? "Checking payment..." : "I've sent the money"}
-            </button>
-            <div className="rounded-xl border bg-gray-50 p-3 text-xs text-gray-600">
-              {lastChecked ? (
-                <p>Last checked: {lastChecked}. Waiting for payment confirmation...</p>
-              ) : (
-                <p>Waiting for payment confirmation...</p>
-              )}
-            </div>
-          </div>
-        ) : null}
-
         <div className="grid grid-cols-2 gap-2">
           <button type="button" className="rounded-xl border px-4 py-3" onClick={() => router.push("/account")} disabled={loading}>
             Back
           </button>
-          <button
-            type="button"
-            className="rounded-xl bg-black px-4 py-3 text-white disabled:opacity-60"
-            onClick={startPayment}
-            disabled={!canPay || loading}
-          >
-            {loading ? "Preparing..." : "Get transfer account"}
-          </button>
+          {checkoutUrl ? (
+            <a
+              href={checkoutUrl}
+              className="inline-flex items-center justify-center rounded-xl bg-black px-4 py-3 text-white"
+            >
+              Continue
+            </a>
+          ) : (
+            <button
+              type="button"
+              className="rounded-xl bg-black px-4 py-3 text-white disabled:opacity-60"
+              onClick={startPayment}
+              disabled={!canPay || loading}
+            >
+              {loading ? "Preparing..." : "Continue"}
+            </button>
+          )}
         </div>
       </div>
     </AppShell>
   );
 }
-

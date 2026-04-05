@@ -95,10 +95,7 @@ export async function POST(req: Request) {
 
     const amountKobo = nairaToKobo(totalNaira);
 
-    const existingReference = orders
-      .map((order) => asText(order.paystack_reference).trim())
-      .find(Boolean);
-    const reference = existingReference || genRef(requestedOrderIds[0]);
+    const reference = genRef(requestedOrderIds[0]);
 
     const envBase = asText(process.env.NEXT_PUBLIC_SITE_URL).trim();
     const xfProto = asText(req.headers.get("x-forwarded-proto")).trim() || "https";
@@ -118,18 +115,16 @@ export async function POST(req: Request) {
 
     const callbackUrl = `${baseUrl}/food/pay/callback`;
 
-    if (orders.some((order) => asText(order.paystack_reference).trim() !== reference)) {
-      const { error: saveRefErr } = await supabaseAdmin
-        .from("orders")
-        .update({ paystack_reference: reference })
-        .in("id", requestedOrderIds);
+    const { error: saveRefErr } = await supabaseAdmin
+      .from("orders")
+      .update({ paystack_reference: reference })
+      .in("id", requestedOrderIds);
 
-      if (saveRefErr) {
-        return NextResponse.json(
-          { ok: false, error: "Failed to save paystack reference on order: " + saveRefErr.message },
-          { status: 500 }
-        );
-      }
+    if (saveRefErr) {
+      return NextResponse.json(
+        { ok: false, error: "Failed to save payment reference on order: " + saveRefErr.message },
+        { status: 500 }
+      );
     }
 
     const customerId = customerIds[0];

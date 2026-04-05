@@ -47,12 +47,13 @@ export async function POST(req: Request) {
     }
 
     const paymentStatus = String(data?.data?.transaction_status ?? "");
+    const normalizedPaymentStatus = paymentStatus.trim().toLowerCase();
     const amountKobo = Number(data?.data?.transaction_amount ?? 0);
     const currency = String(data?.data?.transaction_currency_id ?? "NGN");
     const paidAt = data?.data?.created_at ?? null;
     const ref = String(data?.data?.transaction_ref ?? reference);
 
-    if (paymentStatus === "success") {
+    if (normalizedPaymentStatus === "success" || normalizedPaymentStatus === "successful") {
       const updatePayload = {
         status: "pending_vendor",
         paystack_reference: ref,

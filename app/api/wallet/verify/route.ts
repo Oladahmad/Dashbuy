@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { creditWalletFromPaystack } from "@/lib/walletCredit";
+import { creditWalletTransaction } from "@/lib/walletCredit";
+import { squadVerifyTransaction } from "@/lib/squad";
 
 type Body = { reference?: string };
 
@@ -31,38 +32,45 @@ export async function POST(req: Request) {
     const reference = String(body?.reference ?? "").trim();
     if (!reference) return NextResponse.json({ ok: false, error: "Missing reference" }, { status: 400 });
 
-    const secret = process.env.PAYSTACK_SECRET_KEY;
+    const secret = process.env.SQUAD_SECRET_KEY;
     if (!secret) {
-      return NextResponse.json({ ok: false, error: "PAYSTACK_SECRET_KEY missing in env" }, { status: 500 });
+      return NextResponse.json({ ok: false, error: "SQUAD_SECRET_KEY missing in env" }, { status: 500 });
     }
 
-    const res = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-      headers: { Authorization: `Bearer ${secret}` },
-    });
-    const data = await res.json();
-    if (!data?.status) {
+    const verification = await squadVerifyTransaction(reference);
+    const data = verification.json;
+    if (!verification.ok || !data?.success) {
       return NextResponse.json({ ok: false, error: data?.message ?? "Verify failed" }, { status: 400 });
     }
 
-    const status = String(data?.data?.status ?? "");
-    if (status !== "success") {
-      return NextResponse.json({ ok: true, status });
+    const status = String(data?.data?.transaction_status ?? "").trim().toLowerCase();
+    if (status !== "success" && status !== "successful") {
+      return NextResponse.json({ ok: true, status: data?.data?.transaction_status ?? status });
     }
 
-    const meta = data?.data?.metadata || {};
-    const type = String(meta?.type ?? "");
-    const customerId = String(meta?.customerId ?? "");
-    const amountKobo = Number(data?.data?.amount ?? 0);
+    const txRef = String(data?.data?.transaction_ref ?? reference);
+    const amountKobo = Number(data?.data?.transaction_amount ?? 0);
     const amount = Math.floor(amountKobo / 100);
-
-    if (type !== "wallet_topup" || !customerId) {
-      return NextResponse.json({ ok: false, error: "Invalid wallet topup metadata" }, { status: 400 });
+    const admin = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
+    const { data: txRow, error: txErr } = await admin
+      .from("wallet_transactions")
+      .select("customer_id,type")
+      .eq("reference", txRef)
+      .maybeSingle<{ customer_id: string; type: string | null }>();
+    if (txErr) {
+      return NextResponse.json({ ok: false, error: txErr.message }, { status: 500 });
+    }
+    const customerId = String(txRow?.customer_id ?? "");
+    const type = String(txRow?.type ?? "");
+    if (type !== "topup" || !customerId) {
+      return NextResponse.json({ ok: false, error: "Wallet transaction not found for this payment." }, { status: 404 });
     }
 
-    const result = await creditWalletFromPaystack({
+    const result = await creditWalletTransaction({
       customerId,
       amount,
-      reference,
+      reference: txRef,
+      provider: "squad",
     });
 
     return NextResponse.json({ ok: result.ok, status: "success", credited: true, already: result.already ?? false });
@@ -71,4 +79,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
-

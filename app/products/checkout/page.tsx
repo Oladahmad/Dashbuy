@@ -88,6 +88,8 @@ export default function ProductCheckoutPage() {
   const [notes, setNotes] = useState("");
   const [payMethod, setPayMethod] = useState<"wallet" | "card">("card");
   const [walletBalance, setWalletBalance] = useState(0);
+  const [walletPinEnabled, setWalletPinEnabled] = useState(false);
+  const [walletPin, setWalletPin] = useState("");
 
   const subtotal = useMemo(
     () => items.reduce((sum, it) => sum + Number(it.price) * Number(it.qty), 0),
@@ -124,6 +126,15 @@ export default function ProductCheckoutPage() {
         const balBody = (await balRes.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
         if (balRes.ok && balBody?.ok) {
           setWalletBalance(Number(balBody.balance ?? 0));
+        }
+
+        const pinRes = await fetch("/api/wallet/pin", {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const pinBody = (await pinRes.json().catch(() => null)) as { ok?: boolean; enabled?: boolean } | null;
+        if (pinRes.ok && pinBody?.ok) {
+          setWalletPinEnabled(!!pinBody.enabled);
         }
       }
 
@@ -300,7 +311,7 @@ export default function ProductCheckoutPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ orderIds: createdOrderIds }),
+        body: JSON.stringify({ orderIds: createdOrderIds, pin: walletPin }),
       });
       const payBody = (await payRes.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
       if (!payRes.ok || !payBody?.ok) {
@@ -310,7 +321,11 @@ export default function ProductCheckoutPage() {
       }
       localStorage.removeItem(CART_KEY);
       setLoading(false);
-      router.push("/products/success");
+      const successQuery =
+        createdOrderIds.length === 1
+          ? `orderId=${encodeURIComponent(createdOrderIds[0])}`
+          : `orderIds=${encodeURIComponent(createdOrderIds.join(","))}`;
+      router.push(`/products/success?${successQuery}`);
       return;
     }
 
@@ -465,6 +480,21 @@ export default function ProductCheckoutPage() {
             {walletBalance < total ? (
               <p className="mt-2 text-xs text-red-600">Wallet balance is not enough for this order.</p>
             ) : null}
+            {!walletPinEnabled ? (
+              <p className="mt-2 text-xs text-red-600">Set your wallet PIN first in Account before paying with wallet.</p>
+            ) : (
+              <div className="mt-3">
+                <label className="text-xs text-gray-600">Wallet PIN</label>
+                <input
+                  className="mt-1 w-full rounded-xl border p-3"
+                  inputMode="numeric"
+                  maxLength={4}
+                  placeholder="Enter your 4-digit PIN"
+                  value={walletPin}
+                  onChange={(e) => setWalletPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                />
+              </div>
+            )}
             <button
               type="button"
               className="mt-2 rounded-xl border px-3 py-2 text-sm"
@@ -481,7 +511,7 @@ export default function ProductCheckoutPage() {
       <button
         className="mt-6 w-full rounded bg-black px-4 py-3 text-white disabled:opacity-60"
         onClick={placeOrder}
-        disabled={items.length === 0 || loading || (payMethod === "wallet" && walletBalance < total)}
+        disabled={items.length === 0 || loading || (payMethod === "wallet" && (walletBalance < total || !walletPinEnabled || walletPin.length !== 4))}
       >
         {payMethod === "wallet" ? "Continue with wallet" : "Continue to payment gateway"}
       </button>

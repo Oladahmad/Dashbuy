@@ -31,7 +31,8 @@ function PaymentCallbackInner() {
 
       const data = await res.json();
 
-      if (!data.ok || data.status !== "success") {
+      const normalizedStatus = String(data?.status ?? "").trim().toLowerCase();
+      if (!data.ok || (normalizedStatus !== "success" && normalizedStatus !== "successful")) {
         setMsg("Payment not successful. If you were charged, contact support.");
         return;
       }

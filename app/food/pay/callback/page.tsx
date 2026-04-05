@@ -34,8 +34,18 @@ function PayCallbackPageInner() {
           return;
         }
 
+        const orderIds = Array.isArray(json?.orders)
+          ? json.orders.map((row: { id?: string }) => String(row?.id ?? "").trim()).filter(Boolean)
+          : [];
+        const successQuery =
+          orderIds.length > 1
+            ? `orderIds=${encodeURIComponent(orderIds.join(","))}`
+            : orderIds.length === 1
+              ? `orderId=${encodeURIComponent(orderIds[0])}`
+              : "";
+
         setMsg("Payment verified. Redirecting...");
-        router.replace("/");
+        router.replace(successQuery ? `/food/order-success?${successQuery}` : "/orders");
       } catch (e: unknown) {
         const m = e instanceof Error ? e.message : "Network error";
         setMsg(m);

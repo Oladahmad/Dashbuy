@@ -116,6 +116,7 @@ export default function OrdersPage() {
   const [msg, setMsg] = useState("");
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [payingId, setPayingId] = useState<string | null>(null);
 
   const groupedOrders = useMemo(() => {
     const groups = new Map<string, OrderRow[]>();
@@ -187,12 +188,44 @@ export default function OrdersPage() {
       return;
     }
 
-    const paymentQuery =
-      group.orders.length > 1
-        ? `/food/pay?orderIds=${encodeURIComponent(group.orders.map((row) => row.id).join(","))}`
-        : `/food/pay?orderId=${encodeURIComponent(group.id)}`;
     setApprovingId(null);
-    router.push(paymentQuery);
+    await continuePayment(group);
+  }
+
+  async function continuePayment(group: OrderGroup) {
+    setPayingId(group.id);
+    setMsg("");
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const session = sessionData.session;
+    const token = session?.access_token;
+    const email = session?.user?.email?.trim() ?? "";
+    if (!token || !email) {
+      setPayingId(null);
+      router.push("/auth/login?next=%2Forders");
+      return;
+    }
+
+    const res = await fetch("/api/paystack/initialize", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        orderId: group.orders.length === 1 ? group.id : undefined,
+        orderIds: group.orders.map((row) => row.id),
+        email,
+      }),
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; authorization_url?: string } | null;
+    if (!res.ok || !body?.ok || !body.authorization_url) {
+      setPayingId(null);
+      setMsg(body?.error ?? "Unable to continue payment.");
+      return;
+    }
+
+    window.location.href = body.authorization_url;
   }
 
   const counts = useMemo(() => {
@@ -343,9 +376,10 @@ export default function OrdersPage() {
                   <button
                     type="button"
                     className="mt-3 rounded-xl bg-black px-4 py-2 text-sm text-white"
-                    onClick={() => router.push(paymentQuery)}
+                    onClick={() => void continuePayment(o)}
+                    disabled={payingId === o.id}
                   >
-                    Continue payment
+                    {payingId === o.id ? "Opening payment..." : "Continue payment"}
                   </button>
                 ) : null}
               </div>

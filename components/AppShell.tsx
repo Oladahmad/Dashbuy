@@ -90,9 +90,14 @@ export default function AppShell({ title, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
 
+  const [mounted, setMounted] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [productsCount, setProductsCount] = useState(0);
   const [foodCount, setFoodCount] = useState(0);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const refresh = () => {
@@ -124,6 +129,7 @@ export default function AppShell({ title, children }: AppShellProps) {
   ];
 
   function isActive(href: string) {
+    if (!mounted) return false;
     if (href === "/") return pathname === "/";
     return pathname?.startsWith(href);
   }

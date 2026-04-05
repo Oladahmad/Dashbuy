@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { squadInitiatePayment } from "@/lib/squad";
 
 type Body = {
   amount?: number | string;
@@ -25,10 +26,6 @@ function readBearerToken(req: Request) {
   const [scheme, token] = h.split(" ");
   if (scheme?.toLowerCase() === "bearer" && token) return token.trim();
   return "";
-}
-
-function nairaToKobo(n: number) {
-  return Math.round(Number(n) * 100);
 }
 
 function asText(x: unknown) {
@@ -58,9 +55,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Enter a valid amount" }, { status: 400 });
     }
 
-    const secret = process.env.PAYSTACK_SECRET_KEY;
+    const secret = process.env.SQUAD_SECRET_KEY;
     if (!secret) {
-      return NextResponse.json({ ok: false, error: "PAYSTACK_SECRET_KEY missing in env" }, { status: 500 });
+      return NextResponse.json({ ok: false, error: "SQUAD_SECRET_KEY missing in env" }, { status: 500 });
     }
 
     const envBase = asText(process.env.NEXT_PUBLIC_SITE_URL).trim();
@@ -79,28 +76,21 @@ export async function POST(req: Request) {
     const reference = `dashbuy_wallet_${customerId.slice(0, 8)}_${Date.now()}`;
     const callbackUrl = `${baseUrl}/account/add-funds/callback`;
 
-    const resp = await fetch("https://api.paystack.co/transaction/initialize", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${secret}`,
-        "Content-Type": "application/json",
+    const squad = await squadInitiatePayment({
+      amountKobo: Math.round(Number(amount) * 100),
+      email,
+      transactionRef: reference,
+      callbackUrl,
+      metadata: {
+        type: "wallet_topup",
+        customerId,
       },
-      body: JSON.stringify({
-        email,
-        amount: nairaToKobo(amount),
-        reference,
-        callback_url: callbackUrl,
-        metadata: {
-          type: "wallet_topup",
-          customerId,
-        },
-      }),
+      paymentChannels: ["card", "bank", "transfer", "ussd"],
     });
-
-    const json = await resp.json();
-    if (!resp.ok || !json?.status) {
+    const json = squad.json;
+    if (!squad.ok || !json?.data?.checkout_url) {
       return NextResponse.json(
-        { ok: false, error: json?.message ?? "Paystack init failed", raw: json },
+        { ok: false, error: json?.message ?? "Wallet payment init failed", raw: json },
         { status: 400 }
       );
     }
@@ -110,15 +100,14 @@ export async function POST(req: Request) {
       customer_id: customerId,
       amount,
       reference,
-      provider: "paystack",
+      provider: "squad",
       type: "topup",
       status: "initialized",
     });
 
-    return NextResponse.json({ ok: true, authorization_url: json.data.authorization_url, reference });
+    return NextResponse.json({ ok: true, authorization_url: json.data.checkout_url, reference });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Server error";
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
-

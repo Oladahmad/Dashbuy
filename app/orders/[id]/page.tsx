@@ -183,6 +183,7 @@ export default function OrderDetailsPage() {
   const [plateItems, setPlateItems] = useState<PlateItemRow[]>([]);
   const [vendorTracking, setVendorTracking] = useState<VendorTrackingCard[]>([]);
   const [approvingQuote, setApprovingQuote] = useState(false);
+  const [openingPayment, setOpeningPayment] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -495,7 +496,44 @@ export default function OrderDetailsPage() {
     }
 
     setApprovingQuote(false);
-    router.push(paymentQuery);
+    await continuePayment();
+  }
+
+  async function continuePayment() {
+    if (!order) return;
+    setOpeningPayment(true);
+    setMsg("");
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const session = sessionData.session;
+    const token = session?.access_token;
+    const email = session?.user?.email?.trim() ?? "";
+    if (!token || !email) {
+      setOpeningPayment(false);
+      router.push("/auth/login?next=%2Forders");
+      return;
+    }
+
+    const res = await fetch("/api/paystack/initialize", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        orderId: order.orderIds.length === 1 ? order.id : undefined,
+        orderIds: order.orderIds,
+        email,
+      }),
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; authorization_url?: string } | null;
+    if (!res.ok || !body?.ok || !body.authorization_url) {
+      setOpeningPayment(false);
+      setMsg(body?.error ?? "Unable to continue payment.");
+      return;
+    }
+
+    window.location.href = body.authorization_url;
   }
 
   return (
@@ -550,9 +588,10 @@ export default function OrderDetailsPage() {
               <button
                 type="button"
                 className="mt-4 rounded-xl bg-black px-4 py-2 text-sm text-white"
-                onClick={() => router.push(paymentQuery)}
+                onClick={() => void continuePayment()}
+                disabled={openingPayment}
               >
-                Continue payment
+                {openingPayment ? "Opening payment..." : "Continue payment"}
               </button>
             ) : null}
           </div>

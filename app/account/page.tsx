@@ -28,16 +28,16 @@ type OrderGroup = {
   orderName: string;
 };
 
-
 type ProfileRow = {
   id: string;
   full_name: string | null;
   phone: string | null;
   address: string | null;
+  wallet_pin_enabled?: boolean | null;
 };
 
 function naira(n: number) {
-  return `₦${Math.round(Number(n) || 0).toLocaleString()}`;
+  return `N${Math.round(Number(n) || 0).toLocaleString()}`;
 }
 
 function fmtDate(iso: string) {
@@ -123,8 +123,7 @@ function groupOrders(rows: OrderRow[]) {
         total: sorted.reduce((sum, item) => sum + Number(item.total ?? 0), 0),
         created_at: primary.created_at,
         orders: sorted,
-        orderName:
-          sorted.map((row) => extractOrderNameFromNotes(row.notes)).find((name) => name.length > 0) ?? "",
+        orderName: sorted.map((row) => extractOrderNameFromNotes(row.notes)).find((name) => name.length > 0) ?? "",
       };
     })
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -135,18 +134,21 @@ export default function AccountPage() {
 
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
-
+  const [pinToast, setPinToast] = useState("");
   const [userEmail, setUserEmail] = useState<string>("");
-
   const [profile, setProfile] = useState<ProfileRow | null>(null);
-
   const [editing, setEditing] = useState(false);
-
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
-
   const [saving, setSaving] = useState(false);
+  const [pinEnabled, setPinEnabled] = useState(false);
+  const [settingPin, setSettingPin] = useState(false);
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [pinMsg, setPinMsg] = useState("");
+  const [pinSaving, setPinSaving] = useState(false);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [orders, setOrders] = useState<OrderGroup[]>([]);
   const [walletBalance, setWalletBalance] = useState(0);
@@ -173,7 +175,7 @@ export default function AccountPage() {
 
       const { data: prof, error: profErr } = await supabase
         .from("profiles")
-        .select("id, full_name, phone, address")
+        .select("id, full_name, phone, address, wallet_pin_enabled")
         .eq("id", user.id)
         .maybeSingle<ProfileRow>();
 
@@ -182,11 +184,10 @@ export default function AccountPage() {
       } else {
         const row: ProfileRow = prof ?? { id: user.id, full_name: null, phone: null, address: null };
         setProfile(row);
-
+        setPinEnabled(!!row.wallet_pin_enabled);
         setFullName(row.full_name ?? "");
         setPhone(row.phone ?? "");
         setAddress(row.address ?? "");
-
         const missing = isBlank(row.full_name) || isBlank(row.phone) || isBlank(row.address);
         setEditing(missing);
       }
@@ -222,7 +223,6 @@ export default function AccountPage() {
           }
         }
         setOrders(groupOrders(rows).slice(0, 3));
-
       }
 
       setOrdersLoading(false);
@@ -244,6 +244,12 @@ export default function AccountPage() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (!pinToast) return;
+    const timer = window.setTimeout(() => setPinToast(""), 2200);
+    return () => window.clearTimeout(timer);
+  }, [pinToast]);
+
   const canSave = useMemo(() => {
     if (!editing) return false;
     if (!clean(fullName)) return false;
@@ -260,11 +266,9 @@ export default function AccountPage() {
   function onCancelEdit() {
     if (!profile) return;
     setMsg("");
-
     setFullName(profile.full_name ?? "");
     setPhone(profile.phone ?? "");
     setAddress(profile.address ?? "");
-
     if (requiredMissing) setEditing(true);
     else setEditing(false);
   }
@@ -297,14 +301,12 @@ export default function AccountPage() {
     const { error } = await supabase.from("profiles").upsert(payload);
 
     setSaving(false);
-
     if (error) return setMsg(error.message);
 
-    setProfile({  ...payload });
-    setMsg("Saved");
+    setProfile({ ...profile, ...payload, wallet_pin_enabled: pinEnabled });
+    setMsg("Profile updated.");
     setEditing(false);
-
-    setTimeout(() => setMsg(""), 1200);
+    window.setTimeout(() => setMsg(""), 1600);
   }
 
   async function resetPassword() {
@@ -317,101 +319,145 @@ export default function AccountPage() {
     router.push("/auth/login");
   }
 
+  async function saveWalletPin() {
+    setPinMsg("");
+    setPinSaving(true);
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token ?? "";
+    if (!token) {
+      setPinSaving(false);
+      router.push("/auth/login");
+      return;
+    }
+
+    const res = await fetch("/api/wallet/pin", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        currentPin,
+        newPin,
+        confirmPin,
+      }),
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    setPinSaving(false);
+    if (!res.ok || !body?.ok) {
+      setPinMsg(body?.error ?? "Unable to save wallet PIN.");
+      return;
+    }
+
+    setPinEnabled(true);
+    setSettingPin(false);
+    setCurrentPin("");
+    setNewPin("");
+    setConfirmPin("");
+    setPinMsg("");
+    setPinToast(pinEnabled ? "Wallet PIN updated." : "Wallet PIN saved.");
+  }
 
   return (
     <AppShell title="Account">
+      {pinToast ? (
+        <div className="fixed left-1/2 top-4 z-40 -translate-x-1/2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-lg">
+          {pinToast}
+        </div>
+      ) : null}
+
       {loading ? (
         <div className="rounded-2xl border bg-white p-5 text-sm text-gray-600">Loading account...</div>
       ) : (
         <>
-          <div className="rounded-2xl border bg-white p-5">
-            <div className="flex items-start justify-between gap-3">
+          <div className="rounded-3xl border bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-lg font-semibold">Profile</p>
+                <p className="text-sm font-medium uppercase tracking-[0.16em] text-gray-500">Profile</p>
+                <p className="mt-2 text-2xl font-semibold text-gray-900">{profile?.full_name ?? "Complete your profile"}</p>
                 <p className="mt-1 text-sm text-gray-600">{userEmail}</p>
                 {requiredMissing ? (
-                  <p className="mt-1 text-xs text-amber-700">Complete your profile to checkout faster</p>
+                  <p className="mt-2 inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+                    Complete your profile to checkout faster
+                  </p>
                 ) : null}
               </div>
 
-              {!editing && !requiredMissing ? (
-                <button className="rounded-xl border px-3 py-2 text-sm" onClick={onEdit} type="button">
-                  Edit
-                </button>
-              ) : null}
-
-              {editing ? (
-                <div className="flex gap-2">
-                  <button
-                    className="rounded-xl border px-3 py-2 text-sm"
-                    onClick={onCancelEdit}
-                    disabled={saving}
-                    type="button"
-                  >
-                    Cancel
+              <div className="flex flex-wrap gap-2">
+                {!editing && !requiredMissing ? (
+                  <button className="rounded-full border px-4 py-2 text-sm font-medium" onClick={onEdit} type="button">
+                    Edit profile
                   </button>
-
-                  <button
-                    className="rounded-xl border px-3 py-2 text-sm"
-                    onClick={saveProfile}
-                    disabled={saving || !canSave}
-                    type="button"
-                  >
-                    {saving ? "Saving..." : "Save"}
-                  </button>
-                </div>
-              ) : null}
+                ) : null}
+              </div>
             </div>
 
-            <div className="mt-4">
+            <div className="mt-5">
               {!editing ? (
-                <div className="space-y-3">
-                  <div className="border-b pb-3">
-                    <p className="text-xs text-gray-600">Full name</p>
-                    <p className="text-sm">{profile?.full_name ?? "Not set"}</p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Full name</p>
+                    <p className="mt-2 text-sm text-gray-900">{profile?.full_name ?? "Not set"}</p>
                   </div>
-
-                  <div className="border-b pb-3">
-                    <p className="text-xs text-gray-600">Phone number</p>
-                    <p className="text-sm">{profile?.phone ?? "Not set"}</p>
+                  <div className="rounded-2xl border p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Phone number</p>
+                    <p className="mt-2 text-sm text-gray-900">{profile?.phone ?? "Not set"}</p>
                   </div>
-
-                  <div>
-                    <p className="text-xs text-gray-600">Delivery address</p>
-                    <p className="text-sm whitespace-pre-wrap">{profile?.address ?? "Not set"}</p>
+                  <div className="rounded-2xl border p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Delivery address</p>
+                    <p className="mt-2 text-sm whitespace-pre-wrap text-gray-900">{profile?.address ?? "Not set"}</p>
                   </div>
                 </div>
               ) : (
                 <div className="grid gap-3">
-                  <div>
-                    <p className="text-sm font-medium">Full name</p>
-                    <input
-                      className="mt-2 w-full rounded-xl border p-3"
-                      placeholder="Your name"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                    />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <p className="text-sm font-medium">Full name</p>
+                      <input
+                        className="mt-2 w-full rounded-2xl border p-3"
+                        placeholder="Your name"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Phone number</p>
+                      <input
+                        className="mt-2 w-full rounded-2xl border p-3"
+                        placeholder="e.g. 08012345678"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                      />
+                    </div>
                   </div>
-
-                  <div>
-                    <p className="text-sm font-medium">Phone number</p>
-                    <input
-                      className="mt-2 w-full rounded-xl border p-3"
-                      placeholder="e.g. 08012345678"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                    />
-                  </div>
-
                   <div>
                     <p className="text-sm font-medium">Delivery address</p>
                     <textarea
-                      className="mt-2 w-full rounded-xl border p-3"
+                      className="mt-2 w-full rounded-2xl border p-3"
                       placeholder="Enter your delivery address"
                       rows={3}
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}
                     />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="rounded-full border px-4 py-2 text-sm font-medium"
+                      onClick={onCancelEdit}
+                      disabled={saving}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                      onClick={saveProfile}
+                      disabled={saving || !canSave}
+                      type="button"
+                    >
+                      {saving ? "Saving..." : "Save profile"}
+                    </button>
                   </div>
                 </div>
               )}
@@ -420,19 +466,161 @@ export default function AccountPage() {
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border bg-white p-5">
-            <div className="flex items-center justify-between">
-              <p className="text-lg font-semibold">Your orders</p>
-              <button
-                className="text-sm text-orange-600 underline"
-                type="button"
-                onClick={() => router.push("/orders")}
-              >
-                View all
-              </button>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+            <div className="rounded-3xl border bg-white p-5 shadow-sm">
+              <div>
+                <p className="text-lg font-semibold">Wallet</p>
+                <p className="mt-1 text-sm text-gray-600">Rejected order refunds and added funds go into one wallet balance.</p>
+              </div>
+
+              <div className="mt-4 rounded-2xl border bg-gray-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Available balance</p>
+                    <p className="mt-2 text-3xl font-semibold text-gray-900">{naira(walletBalance)}</p>
+                  </div>
+                  <button
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium text-white ${pinEnabled ? "bg-black" : "bg-black"}`}
+                    type="button"
+                    onClick={() => {
+                      setSettingPin(true);
+                      setPinMsg("");
+                    }}
+                  >
+                    {pinEnabled ? "Reset PIN" : "Set PIN"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border p-4">
+                <p className="text-sm font-semibold text-gray-900">Wallet PIN</p>
+                <p className="mt-1 text-sm text-gray-600">
+                  {pinEnabled
+                    ? "Your wallet PIN is active. Only reset it when you want to change it."
+                    : "Set a 4-digit PIN before wallet payments can go through."}
+                </p>
+
+                {settingPin ? (
+                  <div className="mt-4 grid gap-3">
+                    {pinEnabled ? (
+                      <div>
+                        <p className="text-sm font-medium">Current PIN</p>
+                        <input
+                          className="mt-2 w-full rounded-2xl border p-3"
+                          inputMode="numeric"
+                          maxLength={4}
+                          placeholder="Enter current 4-digit PIN"
+                          value={currentPin}
+                          onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                        />
+                      </div>
+                    ) : null}
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <p className="text-sm font-medium">New PIN</p>
+                        <input
+                          className="mt-2 w-full rounded-2xl border p-3"
+                          inputMode="numeric"
+                          maxLength={4}
+                          placeholder="Enter new 4-digit PIN"
+                          value={newPin}
+                          onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                        />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">Confirm PIN</p>
+                        <input
+                          className="mt-2 w-full rounded-2xl border p-3"
+                          inputMode="numeric"
+                          maxLength={4}
+                          placeholder="Confirm new 4-digit PIN"
+                          value={confirmPin}
+                          onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        className="rounded-full border px-4 py-2 text-sm font-medium"
+                        type="button"
+                        onClick={() => {
+                          setSettingPin(false);
+                          setCurrentPin("");
+                          setNewPin("");
+                          setConfirmPin("");
+                          setPinMsg("");
+                        }}
+                        disabled={pinSaving}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                        type="button"
+                        onClick={saveWalletPin}
+                        disabled={pinSaving}
+                      >
+                        {pinSaving ? "Saving..." : pinEnabled ? "Update PIN" : "Save PIN"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {pinMsg ? <p className="mt-3 text-sm text-orange-600">{pinMsg}</p> : null}
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  className="rounded-3xl border border-stone-200 bg-stone-50 px-4 py-3 text-center text-sm font-semibold text-stone-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-md"
+                  type="button"
+                  onClick={() => router.push("/account/add-funds")}
+                >
+                  Add funds
+                </button>
+                <button
+                  className="rounded-3xl border border-stone-200 bg-stone-50 px-4 py-3 text-center text-sm font-semibold text-stone-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-md"
+                  type="button"
+                  onClick={() => router.push("/account/withdraw")}
+                >
+                  Withdraw funds
+                </button>
+              </div>
             </div>
 
-            <p className="mt-1 text-sm text-gray-600">Showing your latest 3 orders.</p>
+            <div className="rounded-3xl border bg-white p-5 shadow-sm">
+              <p className="text-lg font-semibold">Sell on Dashbuy</p>
+              <p className="mt-1 text-sm text-gray-600">Want to upload products or food? Become a vendor and start selling.</p>
+              <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-3xl border border-stone-900">
+                <button
+                  className="bg-stone-900 px-4 py-3 text-center text-sm font-semibold text-white transition hover:bg-black"
+                  onClick={() => router.push("/auth/vendor-signup")}
+                  type="button"
+                >
+                  Become a vendor
+                </button>
+                <button
+                  className="border-l border-stone-900 bg-white px-4 py-3 text-center text-sm font-semibold text-stone-900 transition hover:bg-stone-50"
+                  onClick={() => router.push("/about")}
+                  type="button"
+                >
+                  About Dashbuy
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-3xl border bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold">Your orders</p>
+                <p className="mt-1 text-sm text-gray-600">Showing your latest 3 orders.</p>
+              </div>
+              <button className="text-sm font-medium text-orange-600 underline" type="button" onClick={() => router.push("/orders")}>
+                View all orders
+              </button>
+            </div>
 
             {ordersLoading ? (
               <div className="mt-3 text-sm text-gray-600">Loading orders...</div>
@@ -447,116 +635,52 @@ export default function AccountPage() {
                     onClick={() => router.push(`/orders/${o.id}`)}
                     className="rounded-2xl border p-4 text-left hover:bg-gray-50"
                   >
-                    <div className="flex items-center justify-between">
-                      <p className="font-semibold">{o.orderName || labelForOrder(o)}</p>
-                      <p className="font-bold">{naira(o.total ?? 0)}</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-semibold text-gray-900">{o.orderName || labelForOrder(o)}</p>
+                      <p className="font-bold text-gray-900">{naira(o.total ?? 0)}</p>
                     </div>
-
-                     <div className="mt-1 flex items-center justify-between text-sm text-gray-600">
-                       <span>{friendlyStatus(o.status)}</span>
-                       <span>{fmtDate(o.created_at)}</span>
-                     </div>
-                     <p className="mt-1 text-xs text-gray-500">{typeForOrder(o)}</p>
-                     {o.orders.length > 1 ? (
-                       <p className="mt-1 text-xs text-gray-500">{o.orders.length} vendor orders in this purchase</p>
-                     ) : null}
-                   </button>
-                 ))}
+                    <div className="mt-1 flex items-center justify-between gap-3 text-sm text-gray-600">
+                      <span>{friendlyStatus(o.status)}</span>
+                      <span>{fmtDate(o.created_at)}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">{typeForOrder(o)}</p>
+                    {o.orders.length > 1 ? (
+                      <p className="mt-1 text-xs text-gray-500">{o.orders.length} vendor orders in this purchase</p>
+                    ) : null}
+                  </button>
+                ))}
               </div>
             )}
           </div>
 
-          <div className="mt-4 rounded-2xl border bg-white p-5">
-            <p className="text-lg font-semibold">Sell on Dashbuy</p>
-            <p className="mt-1 text-sm text-gray-600">Want to upload products or food? Become a vendor and start selling.</p>
-
-            <button
-              className="mt-3 w-full rounded-xl bg-black px-4 py-3 text-white"
-              onClick={() => router.push("/auth/vendor-signup")}
-              type="button"
-            >
-              Become a vendor →
-            </button>
-          </div>
-
-          <div className="mt-4 rounded-2xl border bg-white p-5">
-            <p className="text-lg font-semibold">Wallet balance</p>
-            <p className="mt-1 text-sm text-gray-600">
-              Rejected order refunds and added funds go into one wallet balance.
-            </p>
-            <div className="mt-3 rounded-xl border p-4">
-              <p className="text-xs text-gray-600">Available balance</p>
-              <p className="mt-1 text-2xl font-semibold">{naira(walletBalance)}</p>
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <div className="mt-4 rounded-3xl border bg-white p-5 shadow-sm">
+            <p className="text-lg font-semibold">Support and legal</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <button
-                className="rounded-xl border px-4 py-3 text-sm"
-                type="button"
-                onClick={() => router.push("/account/add-funds")}
-              >
-                Add funds
-              </button>
-              <button
-                className="rounded-xl bg-black px-4 py-3 text-sm text-white"
-                type="button"
-                onClick={() => router.push("/account/withdraw")}
-              >
-                Withdraw funds
-              </button>
-            </div>
-            <button
-              className="mt-3 w-full rounded-xl border px-4 py-3 text-sm"
-              type="button"
-              onClick={() => router.push("/food?tab=restaurants")}
-            >
-              Check other restaurants
-            </button>
-          </div>
-
-          <div className="mt-4 rounded-2xl border bg-white p-5">
-            <p className="text-lg font-semibold">Help & About</p>
-
-            <div className="mt-3 grid gap-2">
-              <button
-                className="rounded-xl border px-4 py-3 text-left"
-                onClick={() => router.push("/about")}
-                type="button"
-              >
-                <p className="font-medium">About Dashbuy</p>
-                <p className="text-sm text-gray-600">What Dashbuy is and how it works</p>
-              </button>
-
-              <a
-                className="rounded-xl border px-4 py-3 block"
-                href="https://wa.me/2347057602937"
-                target="_blank"
-                rel="noreferrer"
-              >
-                <p className="font-medium">Contact Support</p>
-                <p className="text-sm text-gray-600">Chat with us on WhatsApp</p>
-              </a>
-
-              <button
-                className="rounded-xl border px-4 py-3 text-left"
+                className="rounded-2xl border px-4 py-3 text-center"
                 onClick={() => router.push("/terms/customer")}
                 type="button"
               >
                 <p className="font-medium">Customer Terms and Conditions</p>
-                <p className="text-sm text-gray-600">Read customer usage and order terms</p>
               </button>
+              <button className="rounded-2xl border px-4 py-3 text-center" onClick={logout} type="button">
+                <p className="font-medium">Log out</p>
+              </button>
+              <button className="rounded-2xl border px-4 py-3 text-center" onClick={resetPassword} type="button">
+                <p className="font-medium">Reset password</p>
+              </button>
+              <a
+                className="rounded-2xl border px-4 py-3 text-center"
+                href="https://wa.me/2347057602937"
+                target="_blank"
+                rel="noreferrer"
+              >
+                <p className="font-medium">Contact support</p>
+              </a>
             </div>
           </div>
 
-          <button className="mt-4 w-full rounded-xl border px-4 py-3" onClick={resetPassword} type="button">
-            Reset password
-          </button>
-
-          <button className="mt-3 w-full rounded-xl bg-black px-4 py-3 text-white" onClick={logout} type="button">
-            Log out
-          </button>
-
           <div className="h-3" />
-
         </>
       )}
     </AppShell>

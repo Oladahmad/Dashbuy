@@ -12,7 +12,7 @@ export default function AddFundsCallbackPage() {
   useEffect(() => {
     (async () => {
       const params = new URLSearchParams(window.location.search);
-      const ref = params.get("reference") || params.get("trxref") || "";
+      const ref = params.get("transaction_ref") || params.get("reference") || params.get("trxref") || "";
       if (!ref) {
         setMsg("Missing payment reference.");
         return;

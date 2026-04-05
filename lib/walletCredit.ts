@@ -18,6 +18,25 @@ export async function creditWalletFromPaystack({
   amount: number;
   reference: string;
 }): Promise<VerifyResult> {
+  return creditWalletTransaction({
+    customerId,
+    amount,
+    reference,
+    provider: "paystack",
+  });
+}
+
+export async function creditWalletTransaction({
+  customerId,
+  amount,
+  reference,
+  provider,
+}: {
+  customerId: string;
+  amount: number;
+  reference: string;
+  provider: string;
+}): Promise<VerifyResult> {
   const a = adminClient();
 
   const { data: existing } = await a
@@ -35,7 +54,7 @@ export async function creditWalletFromPaystack({
       customer_id: customerId,
       amount,
       reference,
-      provider: "paystack",
+      provider,
       type: "topup",
       status: "success",
     });
@@ -57,4 +76,3 @@ export async function creditWalletFromPaystack({
 
   return { ok: true };
 }
-
