@@ -74,6 +74,22 @@ function WalletHistoryPageContent() {
     }, 0);
   }, [items]);
 
+  const totalAdded = useMemo(() => {
+    return items.reduce((sum, item) => {
+      const amount = Number(item.amount ?? 0);
+      if (item.type === "payment" || item.type === "withdrawal_request") return sum;
+      return sum + amount;
+    }, 0);
+  }, [items]);
+
+  const totalRemoved = useMemo(() => {
+    return items.reduce((sum, item) => {
+      const amount = Number(item.amount ?? 0);
+      if (item.type === "payment" || item.type === "withdrawal_request") return sum + amount;
+      return sum;
+    }, 0);
+  }, [items]);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -120,12 +136,22 @@ function WalletHistoryPageContent() {
         </div>
 
         <div className="mt-4">
-          <div className="rounded-2xl border bg-gray-50 p-4">
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Current balance</p>
-            <p className="mt-2 text-2xl font-semibold text-gray-900">{naira(balance)}</p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border bg-gray-50 p-4">
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">History total added</p>
+              <p className="mt-2 text-2xl font-semibold text-emerald-700">{naira(totalAdded)}</p>
+            </div>
+            <div className="rounded-2xl border bg-gray-50 p-4">
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">History total removed</p>
+              <p className="mt-2 text-2xl font-semibold text-red-600">{naira(totalRemoved)}</p>
+            </div>
+            <div className="rounded-2xl border bg-gray-50 p-4">
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Withdrawable balance</p>
+              <p className="mt-2 text-2xl font-semibold text-gray-900">{naira(balance)}</p>
+            </div>
           </div>
 
-          <label className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Filter</label>
+          <label className="mt-4 block text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Filter</label>
           <select
             className="mt-3 w-full rounded-2xl border bg-white px-4 py-3 text-sm font-medium"
             value={filter}
@@ -180,7 +206,6 @@ function WalletHistoryPageContent() {
                             ? "Withdrawal"
                             : "Wallet activity"}
                   </span>
-                  <span className="truncate">{item.reference}</span>
                 </div>
               </button>
             ))}

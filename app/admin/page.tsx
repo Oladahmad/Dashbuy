@@ -141,9 +141,9 @@ export default function AdminPage() {
       {!loading && !msg ? (
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <p className="text-xs uppercase tracking-wide text-gray-500">Users</p>
+            <p className="text-xs uppercase tracking-wide text-gray-500">Customer users</p>
             <p className="mt-2 text-4xl font-bold text-black">{metrics.usersCount.toLocaleString()}</p>
-            <p className="mt-1 text-xs text-gray-500">Customer accounts</p>
+            <p className="mt-1 text-xs text-gray-500">All registered accounts including vendors</p>
           </div>
 
           <div className="rounded-2xl border bg-white p-5 shadow-sm">

@@ -17,6 +17,14 @@ async function countProfilesByRole(role: string) {
   return Number(count ?? 0);
 }
 
+async function countAllProfiles() {
+  const { count, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id", { count: "exact", head: true });
+  if (error) throw error;
+  return Number(count ?? 0);
+}
+
 export async function GET(req: Request) {
   try {
     const token = readBearerToken(req);
@@ -38,7 +46,7 @@ export async function GET(req: Request) {
     }
 
     const [usersCount, vendorProductsCount, vendorFoodCount] = await Promise.all([
-      countProfilesByRole("customer"),
+      countAllProfiles(),
       countProfilesByRole("vendor_products"),
       countProfilesByRole("vendor_food"),
     ]);
@@ -56,4 +64,3 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
-
