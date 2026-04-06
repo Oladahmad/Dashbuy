@@ -36,6 +36,17 @@ type ProfileRow = {
   wallet_pin_enabled?: boolean | null;
 };
 
+type WalletHistoryItem = {
+  id: string;
+  amount: number | null;
+  reference: string;
+  provider: string | null;
+  type: string | null;
+  status: string | null;
+  created_at: string;
+  source?: string;
+};
+
 function naira(n: number) {
   return `N${Math.round(Number(n) || 0).toLocaleString()}`;
 }
@@ -82,6 +93,14 @@ function friendlyStatus(status: string | null) {
   if (s === "cancelled") return "Cancelled";
   if (s === "refunded") return "Refunded";
   return status ?? "Unknown";
+}
+
+function calculateWalletBalance(items: Array<Pick<WalletHistoryItem, "amount" | "type">>) {
+  return items.reduce((sum, item) => {
+    const amount = Number(item.amount ?? 0);
+    if (item.type === "payment" || item.type === "withdrawal_request") return sum - amount;
+    return sum + amount;
+  }, 0);
 }
 
 function groupStatus(orders: OrderRow[]) {
@@ -239,12 +258,12 @@ export default function AccountPage() {
       if (showBusy) setWalletRefreshing(false);
       return;
     }
-    const res = await fetch("/api/wallet/balance", {
+    const res = await fetch("/api/wallet/history?filter=all", {
       method: "GET",
       headers: { Authorization: `Bearer ${token}` },
     });
-    const body = (await res.json().catch(() => null)) as { ok?: boolean; balance?: number } | null;
-    if (res.ok && body?.ok) setWalletBalance(Number(body.balance ?? 0));
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; items?: WalletHistoryItem[] } | null;
+    if (res.ok && body?.ok) setWalletBalance(calculateWalletBalance(body.items ?? []));
     if (showBusy) setWalletRefreshing(false);
   }
 

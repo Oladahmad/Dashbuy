@@ -50,10 +50,19 @@ function amountText(item: WalletHistoryItem) {
   return `+${amount}`;
 }
 
+function calculateWalletBalance(items: Array<Pick<WalletHistoryItem, "amount" | "type">>) {
+  return items.reduce((sum, item) => {
+    const amount = Number(item.amount ?? 0);
+    if (item.type === "payment" || item.type === "withdrawal_request") return sum - amount;
+    return sum + amount;
+  }, 0);
+}
+
 function WalletHistoryPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [msg, setMsg] = useState("");
   const [items, setItems] = useState<WalletHistoryItem[]>([]);
 
@@ -66,57 +75,40 @@ function WalletHistoryPageContent() {
     return "all";
   }, [searchParams]);
 
-  const balance = useMemo(() => {
-    return items.reduce((sum, item) => {
-      const amount = Number(item.amount ?? 0);
-      if (item.type === "payment" || item.type === "withdrawal_request") return sum - amount;
-      return sum + amount;
-    }, 0);
-  }, [items]);
+  const balance = useMemo(() => calculateWalletBalance(items), [items]);
 
-  const totalAdded = useMemo(() => {
-    return items.reduce((sum, item) => {
-      const amount = Number(item.amount ?? 0);
-      if (item.type === "payment" || item.type === "withdrawal_request") return sum;
-      return sum + amount;
-    }, 0);
-  }, [items]);
+  async function loadHistory(showRefreshing = false) {
+    if (showRefreshing) setRefreshing(true);
+    else setLoading(true);
+    setMsg("");
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token ?? "";
+    if (!token) {
+      router.replace("/auth/login?next=%2Faccount%2Fwallet-history");
+      return;
+    }
 
-  const totalRemoved = useMemo(() => {
-    return items.reduce((sum, item) => {
-      const amount = Number(item.amount ?? 0);
-      if (item.type === "payment" || item.type === "withdrawal_request") return sum + amount;
-      return sum;
-    }, 0);
-  }, [items]);
+    const res = await fetch(`/api/wallet/history?filter=${encodeURIComponent(filter)}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; items?: WalletHistoryItem[] } | null;
+    if (!res.ok || !body?.ok) {
+      setMsg(body?.error ?? "Unable to load wallet history.");
+      setItems([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    setItems(body.items ?? []);
+    setLoading(false);
+    setRefreshing(false);
+  }
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      setMsg("");
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token ?? "";
-      if (!token) {
-        router.replace("/auth/login?next=%2Faccount%2Fwallet-history");
-        return;
-      }
-
-      const res = await fetch(`/api/wallet/history?filter=${encodeURIComponent(filter)}`, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; items?: WalletHistoryItem[] } | null;
-      if (!res.ok || !body?.ok) {
-        setMsg(body?.error ?? "Unable to load wallet history.");
-        setItems([]);
-        setLoading(false);
-        return;
-      }
-
-      setItems(body.items ?? []);
-      setLoading(false);
-    })();
-  }, [filter, router]);
+    loadHistory();
+  }, [filter]);
 
   function setFilter(next: "all" | "bank_funding" | "rejected" | "spent" | "withdrawal") {
     router.push(`/account/wallet-history?filter=${next}`);
@@ -136,18 +128,20 @@ function WalletHistoryPageContent() {
         </div>
 
         <div className="mt-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border bg-gray-50 p-4">
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">History total added</p>
-              <p className="mt-2 text-2xl font-semibold text-emerald-700">{naira(totalAdded)}</p>
-            </div>
-            <div className="rounded-2xl border bg-gray-50 p-4">
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">History total removed</p>
-              <p className="mt-2 text-2xl font-semibold text-red-600">{naira(totalRemoved)}</p>
-            </div>
-            <div className="rounded-2xl border bg-gray-50 p-4">
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Withdrawable balance</p>
-              <p className="mt-2 text-2xl font-semibold text-gray-900">{naira(balance)}</p>
+          <div className="rounded-2xl border bg-gray-50 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.14em] text-gray-500">Available balance</p>
+                <p className="mt-2 text-2xl font-semibold text-gray-900">{naira(balance)}</p>
+              </div>
+              <button
+                className="rounded-full border bg-white px-3 py-1.5 text-xs font-medium text-gray-700"
+                type="button"
+                onClick={() => loadHistory(true)}
+                disabled={refreshing}
+              >
+                {refreshing ? "Refreshing..." : "Refresh"}
+              </button>
             </div>
           </div>
 
