@@ -114,7 +114,6 @@ export default function VendorManualPage() {
       return;
     }
 
-    setGeneratedLink(body.link ?? "");
     setCustomerName("");
     setCustomerPhone("");
     setDeliveryAddress("");
