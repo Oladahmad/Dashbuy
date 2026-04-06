@@ -3,13 +3,15 @@ export type ManualMeta = {
   customerName: string;
   itemsText: string;
   riderMapUrl: string;
+  source: "logistics" | "vendor";
 };
 
 const MARKER = "[LOGI_DIRECT=1]";
+const SOURCE_RE = /\[LOGI_SOURCE=([^\]]*)\]/i;
 const CUSTOMER_RE = /\[LOGI_CUSTOMER=([^\]]*)\]/i;
 const ITEMS_RE = /\[LOGI_ITEMS=([^\]]*)\]/i;
 const RIDER_MAP_RE = /\[LOGI_RIDER_MAP=([^\]]*)\]/i;
-const STRIP_RE = /\[LOGI_DIRECT=1\]|\[LOGI_CUSTOMER=[^\]]*\]|\[LOGI_ITEMS=[^\]]*\]|\[LOGI_RIDER_MAP=[^\]]*\]/gi;
+const STRIP_RE = /\[LOGI_DIRECT=1\]|\[LOGI_SOURCE=[^\]]*\]|\[LOGI_CUSTOMER=[^\]]*\]|\[LOGI_ITEMS=[^\]]*\]|\[LOGI_RIDER_MAP=[^\]]*\]/gi;
 const STRIP_RIDER_MAP_RE = /\[LOGI_RIDER_MAP=[^\]]*\]/gi;
 
 function enc(v: string) {
@@ -24,7 +26,13 @@ function dec(v: string) {
   }
 }
 
-export function buildManualLogisticsNotes(baseNotes: string, customerName: string, itemsText: string, riderMapUrl = "") {
+export function buildManualLogisticsNotes(
+  baseNotes: string,
+  customerName: string,
+  itemsText: string,
+  riderMapUrl = "",
+  source: "logistics" | "vendor" = "logistics"
+) {
   const clean = String(baseNotes ?? "")
     .replace(STRIP_RE, "")
     .trim()
@@ -32,7 +40,7 @@ export function buildManualLogisticsNotes(baseNotes: string, customerName: strin
     .replace(/\s*\|$/, "");
 
   const rider = riderMapUrl.trim() ? ` [LOGI_RIDER_MAP=${enc(riderMapUrl)}]` : "";
-  const marker = `${MARKER} [LOGI_CUSTOMER=${enc(customerName)}] [LOGI_ITEMS=${enc(itemsText)}]${rider}`;
+  const marker = `${MARKER} [LOGI_SOURCE=${enc(source)}] [LOGI_CUSTOMER=${enc(customerName)}] [LOGI_ITEMS=${enc(itemsText)}]${rider}`;
   return clean ? `${clean} | ${marker}` : marker;
 }
 
@@ -42,11 +50,13 @@ export function parseManualLogisticsNotes(notes: string | null | undefined): Man
   const customer = text.match(CUSTOMER_RE)?.[1] ?? "";
   const items = text.match(ITEMS_RE)?.[1] ?? "";
   const riderMap = text.match(RIDER_MAP_RE)?.[1] ?? "";
+  const sourceRaw = dec(text.match(SOURCE_RE)?.[1] ?? "").toLowerCase();
   return {
     isManual,
     customerName: dec(customer),
     itemsText: dec(items),
     riderMapUrl: dec(riderMap),
+    source: sourceRaw === "vendor" ? "vendor" : "logistics",
   };
 }
 

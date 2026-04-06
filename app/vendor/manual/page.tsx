@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { parseManualLogisticsNotes } from "@/lib/manualLogistics";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
-import { useRouter } from "next/navigation";
 
 type ManualRow = {
   id: string;
@@ -20,7 +20,12 @@ function naira(n: number) {
   return `N${Math.round(Number(n) || 0).toLocaleString()}`;
 }
 
-export default function LogisticsManualPage() {
+function friendlyStatus(status: string | null) {
+  const value = String(status ?? "").replace(/_/g, " ").trim();
+  return value || "pending vendor";
+}
+
+export default function VendorManualPage() {
   const router = useRouter();
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -31,27 +36,35 @@ export default function LogisticsManualPage() {
   const [msg, setMsg] = useState("");
   const [msgType, setMsgType] = useState<"error" | "success">("error");
   const [creating, setCreating] = useState(false);
-  const [generatedLink, setGeneratedLink] = useState("");
   const [recent, setRecent] = useState<ManualRow[]>([]);
   const [loadingRecent, setLoadingRecent] = useState(true);
-  const [acceptingId, setAcceptingId] = useState<string | null>(null);
 
   async function loadRecent() {
     setLoadingRecent(true);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const user = sessionData.session?.user;
+    if (!user) {
+      router.push("/auth/login");
+      return;
+    }
+
     const { data, error } = await supabase
       .from("orders")
       .select("id,status,total,customer_phone,delivery_address,notes,created_at")
+      .eq("vendor_id", user.id)
       .ilike("notes", "%[LOGI_DIRECT=1]%")
       .order("created_at", { ascending: false });
 
     if (error) {
       setMsg(error.message);
+      setMsgType("error");
       setRecent([]);
       setLoadingRecent(false);
       return;
     }
 
-    setRecent((((data ?? []) as ManualRow[]) || []).filter((row) => parseManualLogisticsNotes(row.notes).source !== "vendor"));
+    const rows = ((data ?? []) as ManualRow[]).filter((row) => parseManualLogisticsNotes(row.notes).source === "vendor");
+    setRecent(rows);
     setLoadingRecent(false);
   }
 
@@ -62,7 +75,6 @@ export default function LogisticsManualPage() {
   async function createManualOrder() {
     setMsg("");
     setMsgType("error");
-    setGeneratedLink("");
 
     if (!customerName.trim()) return setMsg("Customer name is required.");
     if (!customerPhone.trim()) return setMsg("Customer phone is required.");
@@ -78,7 +90,7 @@ export default function LogisticsManualPage() {
     }
 
     setCreating(true);
-    const res = await fetch("/api/logistics/manual-orders/create", {
+    const res = await fetch("/api/vendor/manual-orders/create", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -94,10 +106,7 @@ export default function LogisticsManualPage() {
       }),
     });
 
-    const body = (await res.json().catch(() => null)) as
-      | { ok?: boolean; error?: string; link?: string }
-      | null;
-
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; orderId?: string } | null;
     if (!res.ok || !body?.ok) {
       setCreating(false);
       setMsgType("error");
@@ -113,56 +122,7 @@ export default function LogisticsManualPage() {
     setRiderMapUrl("");
     setTotal("");
     setCreating(false);
-    await loadRecent();
-  }
-
-  async function acceptOrder(orderId: string) {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-    if (!token) {
-      router.push("/auth/login");
-      return;
-    }
-
-    setAcceptingId(orderId);
-    setMsg("");
-    setMsgType("error");
-    const res = await fetch("/api/logistics/manual-orders/accept", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ orderId }),
-    });
-    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    if (!res.ok || !body?.ok) {
-      setAcceptingId(null);
-      setMsgType("error");
-      setMsg(body?.error ?? "Failed to accept order.");
-      return;
-    }
-
-    setAcceptingId(null);
-    await loadRecent();
-  }
-
-  async function copyGeneratedLink() {
-    if (!generatedLink) return;
-    try {
-      await navigator.clipboard.writeText(generatedLink);
-      setMsgType("success");
-      setMsg("Tracking link copied.");
-    } catch {
-      setMsgType("error");
-      setMsg("Could not copy link on this device.");
-    }
-  }
-
-  function sendGeneratedLinkWhatsApp() {
-    if (!generatedLink) return;
-    const text = encodeURIComponent(`Hello,\nTrack your Dashbuy delivery with this link:\n${generatedLink}`);
-    window.open(`https://wa.me/?text=${text}`, "_blank");
+    router.push(`/vendor/manual/${body.orderId}`);
   }
 
   return (
@@ -171,9 +131,9 @@ export default function LogisticsManualPage() {
         <div className="flex items-center justify-between gap-2">
           <div>
             <h1 className="text-lg font-semibold">Manual customer orders</h1>
-            <p className="mt-1 text-sm text-gray-600">Create paid orders and generate tracking links for your direct customers.</p>
+            <p className="mt-1 text-sm text-gray-600">Create paid orders and manage each order from its own details page.</p>
           </div>
-          <button type="button" className="rounded-xl border px-3 py-2 text-sm" onClick={() => router.push("/logistics")}>
+          <button type="button" className="rounded-xl border px-3 py-2 text-sm" onClick={() => router.push("/vendor")}>
             Back
           </button>
         </div>
@@ -196,7 +156,13 @@ export default function LogisticsManualPage() {
           </div>
           <div>
             <label className="text-sm">Items ordered</label>
-            <textarea className="mt-1 w-full rounded-xl border px-3 py-2" rows={4} placeholder={"Rice x2 - N4,000\nChicken x1 - N2,000"} value={itemsText} onChange={(e) => setItemsText(e.target.value)} />
+            <textarea
+              className="mt-1 w-full rounded-xl border px-3 py-2"
+              rows={4}
+              placeholder={"Rice x2 - N4,000\nChicken x1 - N2,000"}
+              value={itemsText}
+              onChange={(e) => setItemsText(e.target.value)}
+            />
           </div>
           <div>
             <label className="text-sm">Rider live map link (optional)</label>
@@ -206,7 +172,6 @@ export default function LogisticsManualPage() {
               value={riderMapUrl}
               onChange={(e) => setRiderMapUrl(e.target.value)}
             />
-            <p className="mt-1 text-xs text-gray-500">Paste a shareable Google Maps live location link for this delivery.</p>
           </div>
           <div>
             <label className="text-sm">Total paid amount</label>
@@ -214,76 +179,53 @@ export default function LogisticsManualPage() {
           </div>
         </div>
 
-        <button type="button" className="mt-4 w-full rounded-xl bg-black px-4 py-3 text-white disabled:opacity-60" onClick={createManualOrder} disabled={creating}>
-          {creating ? "Creating..." : "Create paid order & generate link"}
-        </button>
-
-        {generatedLink ? (
-          <div className="mt-3 rounded-xl border bg-gray-50 p-3">
-            <p className="text-xs text-gray-600">Tracking link</p>
-            <p className="mt-1 break-all text-sm">{generatedLink}</p>
-            <div className="mt-3 flex gap-2">
-              <button type="button" className="rounded-lg border bg-white px-3 py-2 text-xs" onClick={copyGeneratedLink}>
-                Copy link
-              </button>
-              <button type="button" className="rounded-lg border bg-white px-3 py-2 text-xs" onClick={sendGeneratedLinkWhatsApp}>
-                Send via WhatsApp
-              </button>
-            </div>
-          </div>
-        ) : null}
+          <button type="button" className="mt-4 w-full rounded-xl bg-black px-4 py-3 text-white disabled:opacity-60" onClick={createManualOrder} disabled={creating}>
+          {creating ? "Creating..." : "Create paid order"}
+          </button>
       </div>
 
       <div className="rounded-2xl border bg-white p-4">
-        <p className="font-semibold">Recent manual orders</p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-semibold">Recent manual orders</p>
+          <button
+            type="button"
+            className="rounded-xl border px-3 py-2 text-sm"
+            onClick={() => router.push("/vendor/manual/orders")}
+          >
+            View all
+          </button>
+        </div>
         {loadingRecent ? (
           <p className="mt-2 text-sm text-gray-600">Loading...</p>
         ) : recent.length === 0 ? (
           <p className="mt-2 text-sm text-gray-600">No manual orders yet.</p>
         ) : (
           <div className="mt-3 grid gap-2">
-            {recent.slice(0, 20).map((row) => {
+            {recent.slice(0, 3).map((row) => {
               const manual = parseManualLogisticsNotes(row.notes);
-              const orderName = extractOrderNameFromNotes(row.notes) || "Delivery order";
-              const isPending = String(row.status ?? "") === "pending_vendor";
+              const orderName = extractOrderNameFromNotes(row.notes) || "Manual order";
               return (
                 <div
                   key={`recent-${row.id}`}
                   role="button"
                   tabIndex={0}
                   className="rounded-xl border p-3 text-left hover:bg-gray-50"
-                  onClick={() => router.push(`/logistics/manual/${row.id}`)}
+                  onClick={() => router.push(`/vendor/manual/${row.id}`)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      router.push(`/logistics/manual/${row.id}`);
+                      router.push(`/vendor/manual/${row.id}`);
                     }
                   }}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-semibold truncate">{orderName}</p>
-                      <p className="mt-1 text-xs text-gray-500">Order ID: {row.id}</p>
+                      <p className="truncate font-semibold">{orderName}</p>
                       <p className="mt-1 text-xs text-gray-600">
-                        {manual.customerName || "Customer"} · {String(row.status ?? "").replace("_", " ")}
+                        {manual.customerName || "Customer"} · {friendlyStatus(row.status)}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold">{naira(Number(row.total ?? 0))}</p>
-                      {isPending ? (
-                        <button
-                          type="button"
-                          className="mt-2 rounded-lg bg-black px-3 py-1.5 text-xs text-white disabled:opacity-60"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            acceptOrder(row.id);
-                          }}
-                          disabled={acceptingId === row.id}
-                        >
-                          {acceptingId === row.id ? "Accepting..." : "Accept order"}
-                        </button>
-                      ) : null}
-                    </div>
+                    <p className="font-semibold">{naira(Number(row.total ?? 0))}</p>
                   </div>
                 </div>
               );
@@ -293,11 +235,7 @@ export default function LogisticsManualPage() {
       </div>
 
       {msg ? (
-        <div
-          className={`rounded-2xl border bg-white p-4 text-sm ${
-            msgType === "success" ? "text-emerald-700 border-emerald-300 bg-emerald-50" : "text-red-600"
-          }`}
-        >
+        <div className={`rounded-2xl border bg-white p-4 text-sm ${msgType === "success" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "text-red-600"}`}>
           {msg}
         </div>
       ) : null}

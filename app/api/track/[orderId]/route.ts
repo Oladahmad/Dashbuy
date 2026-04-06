@@ -52,6 +52,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ orderId: s
         customerName: manual.customerName,
         itemsText: manual.itemsText,
         riderMapUrl: manual.riderMapUrl,
+        source: manual.source,
         createdAt: order.created_at,
       },
     });

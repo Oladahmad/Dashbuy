@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
@@ -15,6 +15,7 @@ type TrackingPayload = {
   customerName: string;
   itemsText: string;
   riderMapUrl?: string;
+  source?: "logistics" | "vendor";
   createdAt: string;
 };
 
@@ -62,7 +63,7 @@ export default function PublicTrackingPage() {
   }, [orderId]);
 
   return (
-    <main className="mx-auto max-w-xl p-4 space-y-4">
+    <main className="mx-auto max-w-xl space-y-4 p-4">
       <header className="rounded-2xl border bg-white p-4">
         <div className="flex items-center gap-3">
           <Image src="/logo.png" alt="Dashbuy" width={44} height={44} className="h-11 w-11 rounded-lg" />
@@ -88,7 +89,9 @@ export default function PublicTrackingPage() {
 
       <div className="rounded-2xl border bg-white p-4">
         <p className="text-lg font-semibold">Track delivery</p>
-        <p className="mt-1 text-sm text-gray-600">Live updates from your logistics partner.</p>
+        <p className="mt-1 text-sm text-gray-600">
+          {data?.source === "vendor" ? "Live updates for your order." : "Live updates from your logistics partner."}
+        </p>
       </div>
 
       {loading ? <div className="rounded-2xl border bg-white p-4 text-sm text-gray-600">Loading...</div> : null}
@@ -99,7 +102,7 @@ export default function PublicTrackingPage() {
           <OrderTimeline
             status={data.status}
             title={data.orderName}
-            subtitle={`Ref ${data.orderId.slice(0, 8)} · ${naira(data.total)}`}
+            subtitle={`Ref ${data.orderId.slice(0, 8)} - ${naira(data.total)}`}
           />
 
           <div className="rounded-2xl border bg-white p-4">
@@ -125,16 +128,23 @@ export default function PublicTrackingPage() {
             ) : null}
           </div>
 
-          <footer className="rounded-2xl border bg-white p-4">
-            <p className="text-sm text-gray-700">
-              This delivery experience is powered by the Dashbuy × Sprint partnership.
-            </p>
-            <div className="mt-4 flex items-center justify-center gap-6">
-              <Image src="/logo.png" alt="Dashbuy" width={96} height={96} className="h-20 w-20 rounded-xl object-contain" />
-              <span className="text-xl font-semibold text-gray-500">X</span>
-              <Image src="/sprintlogo.jpg" alt="Sprint" width={96} height={96} className="h-20 w-20 rounded-xl object-contain bg-white p-1" />
-            </div>
-          </footer>
+          {data.source === "vendor" ? (
+            <footer className="rounded-2xl border bg-white p-4">
+              <p className="text-sm text-gray-700">This order is being tracked through Dashbuy.</p>
+              <div className="mt-4 flex items-center justify-center">
+                <Image src="/logo.png" alt="Dashbuy" width={110} height={110} className="h-24 w-24 rounded-xl object-contain" />
+              </div>
+            </footer>
+          ) : (
+            <footer className="rounded-2xl border bg-white p-4">
+              <p className="text-sm text-gray-700">This delivery experience is powered by the Dashbuy x Sprint partnership.</p>
+              <div className="mt-4 flex items-center justify-center gap-6">
+                <Image src="/logo.png" alt="Dashbuy" width={96} height={96} className="h-20 w-20 rounded-xl object-contain" />
+                <span className="text-xl font-semibold text-gray-500">X</span>
+                <Image src="/sprintlogo.jpg" alt="Sprint" width={96} height={96} className="h-20 w-20 rounded-xl object-contain bg-white p-1" />
+              </div>
+            </footer>
+          )}
         </>
       ) : null}
     </main>

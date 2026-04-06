@@ -154,12 +154,12 @@ export default function HistoryPage() {
           ...r,
           customer_name: (() => {
             const m = parseManualLogisticsNotes(orderNoteMap.get(r.order_id) || "");
-            return m.isManual ? m.customerName || r.customer_name : r.customer_name;
+            return m.isManual && m.source !== "vendor" ? m.customerName || r.customer_name : r.customer_name;
           })(),
           customer_note: (() => {
             const note = orderNoteMap.get(r.order_id) || "";
             const m = parseManualLogisticsNotes(note);
-            return m.isManual ? m.itemsText || null : note || null;
+            return m.isManual && m.source !== "vendor" ? m.itemsText || null : note || null;
           })(),
         }))
       );

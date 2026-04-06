@@ -18,16 +18,11 @@ type OrderRow = {
   created_at: string;
 };
 
-type JobRow = {
-  id: string;
-  status: "pending_pickup" | "picked_up" | "delivered" | "cancelled";
-};
-
 function naira(n: number) {
   return `N${Math.round(Number(n) || 0).toLocaleString()}`;
 }
 
-export default function LogisticsManualOrderDetailsPage() {
+export default function VendorManualOrderDetailsPage() {
   const params = useParams<{ orderId?: string }>();
   const router = useRouter();
   const orderId = String(params?.orderId ?? "");
@@ -35,7 +30,6 @@ export default function LogisticsManualOrderDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [order, setOrder] = useState<OrderRow | null>(null);
-  const [job, setJob] = useState<JobRow | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function load() {
@@ -62,21 +56,14 @@ export default function LogisticsManualOrderDetailsPage() {
     }
 
     const manual = parseManualLogisticsNotes(row.notes);
-    if (!manual.isManual || manual.source === "vendor") {
-      setMsg("This is not a manual logistics order.");
+    if (!manual.isManual || manual.source !== "vendor") {
+      setMsg("This is not a vendor manual order.");
       setOrder(null);
       setLoading(false);
       return;
     }
 
-    const { data: jobRow } = await supabase
-      .from("logistics_jobs")
-      .select("id,status")
-      .eq("order_id", orderId)
-      .maybeSingle<JobRow>();
-
     setOrder(row);
-    setJob(jobRow ?? null);
     setLoading(false);
   }
 
@@ -85,8 +72,8 @@ export default function LogisticsManualOrderDetailsPage() {
   }, [orderId]);
 
   const manual = useMemo(() => parseManualLogisticsNotes(order?.notes), [order?.notes]);
-  const orderName = extractOrderNameFromNotes(order?.notes) || "Delivery order";
-  const effectiveStatus = resolveTrackingStatus(order?.status, job?.status ?? null);
+  const orderName = extractOrderNameFromNotes(order?.notes) || "Manual order";
+  const effectiveStatus = resolveTrackingStatus(order?.status, null);
   const trackingBase =
     (process.env.NEXT_PUBLIC_TRACKING_BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || "").replace(/\/$/, "");
   const trackingLink =
@@ -96,17 +83,40 @@ export default function LogisticsManualOrderDetailsPage() {
 
   const primaryAction = useMemo(() => {
     if (!order) return null;
-    if (String(order.status ?? "") === "pending_vendor") {
-      return { key: "accept", label: "Accept order", run: acceptOrder };
-    }
-    if (job?.status === "pending_pickup") {
-      return { key: "pickup", label: "Mark picked up", run: () => setJobStatus("picked_up") };
-    }
-    if (job?.status === "picked_up") {
-      return { key: "delivered", label: "Mark delivered", run: () => setJobStatus("delivered") };
-    }
+    if (String(order.status ?? "") === "pending_vendor") return { label: "Accept order", nextStatus: "accepted" as const };
+    if (String(order.status ?? "") === "accepted") return { label: "Mark picked up", nextStatus: "picked_up" as const };
+    if (String(order.status ?? "") === "picked_up") return { label: "Mark delivered", nextStatus: "delivered" as const };
     return null;
-  }, [order, job]);
+  }, [order]);
+
+  async function updateOrderStatus(nextStatus: "accepted" | "picked_up" | "delivered") {
+    if (!order) return;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) {
+      router.push("/auth/login");
+      return;
+    }
+
+    setBusy(true);
+    const res = await fetch("/api/vendor/manual-orders/status", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ orderId: order.id, nextStatus }),
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!res.ok || !body?.ok) {
+      setBusy(false);
+      setMsg(body?.error ?? "Failed to update order.");
+      return;
+    }
+
+    setBusy(false);
+    await load();
+  }
 
   async function copyTrackingLink() {
     try {
@@ -118,67 +128,8 @@ export default function LogisticsManualOrderDetailsPage() {
   }
 
   function sendTrackingViaWhatsApp() {
-    const text = encodeURIComponent(
-      `Hello,\nTrack your Dashbuy delivery with this link:\n${trackingLink}`
-    );
+    const text = encodeURIComponent(`Hello,\nTrack your Dashbuy order with this link:\n${trackingLink}`);
     window.open(`https://wa.me/?text=${text}`, "_blank");
-  }
-
-  async function acceptOrder() {
-    if (!order) return;
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-    if (!token) {
-      router.push("/auth/login");
-      return;
-    }
-
-    setBusy(true);
-    const res = await fetch("/api/logistics/manual-orders/accept", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ orderId: order.id }),
-    });
-    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    if (!res.ok || !body?.ok) {
-      setBusy(false);
-      setMsg(body?.error ?? "Failed to accept order.");
-      return;
-    }
-
-    setBusy(false);
-    await load();
-  }
-
-  async function setJobStatus(nextStatus: "picked_up" | "delivered") {
-    if (!job) return;
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-    if (!token) {
-      router.push("/auth/login");
-      return;
-    }
-
-    setBusy(true);
-    const res = await fetch("/api/logistics/jobs/status", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ jobId: job.id, nextStatus }),
-    });
-    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    if (!res.ok || !body?.ok) {
-      setBusy(false);
-      setMsg(body?.error ?? "Failed to update status.");
-      return;
-    }
-    setBusy(false);
-    await load();
   }
 
   return (
@@ -189,7 +140,7 @@ export default function LogisticsManualOrderDetailsPage() {
             <p className="text-lg font-semibold">Manual order details</p>
             <p className="mt-1 text-sm text-gray-600">Order ID: {orderId}</p>
           </div>
-          <button type="button" className="rounded-xl border px-3 py-2 text-sm" onClick={() => router.push("/logistics/manual")}>
+          <button type="button" className="rounded-xl border px-3 py-2 text-sm" onClick={() => router.push("/vendor/manual")}>
             Back
           </button>
         </div>
@@ -223,36 +174,28 @@ export default function LogisticsManualOrderDetailsPage() {
             <p className="font-semibold">Tracking link</p>
             <p className="mt-1 break-all text-sm">{trackingLink}</p>
             <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                className="rounded-lg border px-3 py-2 text-xs"
-                onClick={copyTrackingLink}
-              >
+              <button type="button" className="rounded-lg border px-3 py-2 text-xs" onClick={copyTrackingLink}>
                 Copy link
               </button>
-              <button
-                type="button"
-                className="rounded-lg border px-3 py-2 text-xs"
-                onClick={sendTrackingViaWhatsApp}
-              >
+              <button type="button" className="rounded-lg border px-3 py-2 text-xs" onClick={sendTrackingViaWhatsApp}>
                 Send via WhatsApp
               </button>
             </div>
           </div>
 
           <div className="rounded-2xl border bg-white p-4">
-            <p className="font-semibold">Actions</p>
+            <p className="font-semibold">Order action</p>
             {primaryAction ? (
               <button
                 type="button"
                 className="mt-3 rounded-xl bg-black px-3 py-2 text-sm text-white disabled:opacity-60"
-                onClick={primaryAction.run}
+                onClick={() => updateOrderStatus(primaryAction.nextStatus)}
                 disabled={busy}
               >
                 {busy ? "Processing..." : primaryAction.label}
               </button>
             ) : (
-              <p className="mt-3 text-sm text-gray-600">No pending action. This order is fully completed.</p>
+              <p className="mt-3 text-sm text-gray-600">This order is fully completed.</p>
             )}
           </div>
         </>

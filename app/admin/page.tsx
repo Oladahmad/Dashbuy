@@ -27,6 +27,28 @@ type MismatchWalletRow = {
   paid_at: string | null;
 };
 
+type ManualOrderItem = {
+  id: string;
+  vendor_id: string;
+  vendor_name: string;
+  status: string | null;
+  total: number;
+  customer_name: string;
+  customer_phone: string;
+  delivery_address: string;
+  order_name: string;
+  items_text: string;
+  created_at: string;
+};
+
+function naira(n: number) {
+  return `N${Math.round(Number(n) || 0).toLocaleString()}`;
+}
+
+function friendlyStatus(status: string | null) {
+  return String(status ?? "").replace(/_/g, " ").trim() || "pending vendor";
+}
+
 export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -39,6 +61,7 @@ export default function AdminPage() {
   });
   const [orderMismatches, setOrderMismatches] = useState<MismatchOrderRow[]>([]);
   const [walletMismatches, setWalletMismatches] = useState<MismatchWalletRow[]>([]);
+  const [manualOrders, setManualOrders] = useState<ManualOrderItem[]>([]);
 
   async function loadMismatches(token: string) {
     const mismatchRes = await fetch("/api/admin/dva-mismatches", {
@@ -117,6 +140,15 @@ export default function AdminPage() {
       }
 
       setMetrics(body.metrics);
+      const manualRes = await fetch("/api/admin/manual-orders", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const manualBody = (await manualRes.json().catch(() => null)) as
+        | { ok?: boolean; error?: string; items?: ManualOrderItem[] }
+        | null;
+      if (manualRes.ok && manualBody?.ok) {
+        setManualOrders(manualBody.items ?? []);
+      }
       setLoading(false);
       if (!alive) return;
       await loadMismatches(token);
@@ -225,6 +257,37 @@ export default function AdminPage() {
       </div>
 
       <div className="rounded-2xl border bg-white p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="font-semibold">Vendor manual orders</p>
+            <p className="mt-1 text-sm text-gray-600">All manual orders created by vendors across Dashbuy.</p>
+          </div>
+          <Link href="/admin/manual-orders" className="rounded-xl border px-4 py-2 text-sm hover:bg-gray-50">
+            View all
+          </Link>
+        </div>
+
+        {manualOrders.length === 0 ? (
+          <div className="mt-3 rounded-xl border p-3 text-sm text-gray-600">No vendor manual orders yet.</div>
+        ) : (
+          <div className="mt-3 grid gap-2">
+            {manualOrders.slice(0, 5).map((item) => (
+              <Link key={item.id} href={`/admin/manual-orders/${item.id}`} className="block rounded-xl border p-3 hover:bg-gray-50">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">{item.order_name}</p>
+                    <p className="mt-1 text-xs text-gray-600">{item.customer_name} · {item.vendor_name}</p>
+                  </div>
+                  <p className="font-semibold">{naira(item.total)}</p>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">{friendlyStatus(item.status)}</p>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border bg-white p-4">
         <p className="font-semibold">Operations</p>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <Link href="/admin/custom-food-requests" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
@@ -232,6 +295,9 @@ export default function AdminPage() {
           </Link>
           <Link href="/admin/notifications" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
             Send push notifications
+          </Link>
+          <Link href="/admin/manual-orders" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
+            View vendor manual orders
           </Link>
         </div>
       </div>
