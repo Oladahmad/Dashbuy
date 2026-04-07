@@ -282,6 +282,27 @@ export default function FoodCheckoutPage() {
     for (const [vendorId, group] of grouped.entries()) {
       const isCustomVendor = vendorId === CUSTOM_REQUEST_VENDOR_ID;
       const orderVendorId = isCustomVendor ? userId : vendorId;
+      if (!isCustomVendor) {
+        try {
+          const vendorRes = await fetch(`/api/catalog/food/vendor/${vendorId}`, { cache: "no-store" });
+          const vendorBody = (await vendorRes.json().catch(() => null)) as
+            | { ok?: boolean; vendor?: { store_name?: string | null; full_name?: string | null; availability?: { isOpen?: boolean; statusLabel?: string } } }
+            | null;
+          const vendorNameForState =
+            String(vendorBody?.vendor?.store_name ?? "").trim() ||
+            String(vendorBody?.vendor?.full_name ?? "").trim() ||
+            "This restaurant";
+          if (!vendorRes.ok || !vendorBody?.ok || vendorBody.vendor?.availability?.isOpen === false) {
+            setLoading(false);
+            setMsg(`${vendorNameForState} is currently closed. ${vendorBody?.vendor?.availability?.statusLabel ?? "Please try again later."}`);
+            return;
+          }
+        } catch {
+          setLoading(false);
+          setMsg("Could not confirm restaurant availability. Please try again.");
+          return;
+        }
+      }
       const vendorSubtotal =
         group.plates.reduce((sum, p) => sum + Number(p.plateTotal), 0) +
         group.combos.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0);

@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { evaluateStoreAvailability } from "@/lib/storeHours";
 
 type RestaurantRow = {
   vendor_id: string;
   name: string;
   area: string | null;
   single_count: number;
+  combo_count: number;
+  logo_url: string | null;
+  is_open: boolean;
+  status_label: string;
 };
 
 export async function GET() {
@@ -42,21 +47,27 @@ export async function GET() {
     counts.set(vid, (counts.get(vid) || 0) + 1);
   });
 
-  const vendorIds = Array.from(counts.keys());
-  if (vendorIds.length === 0) {
-    return NextResponse.json({ ok: true, combos: combos ?? [], restaurants: [] });
-  }
+  const comboCounts = new Map<string, number>();
+  ((combos ?? []) as Array<{ vendor_id: string }>).forEach((row) => {
+    const vid = row.vendor_id;
+    comboCounts.set(vid, (comboCounts.get(vid) || 0) + 1);
+  });
 
   const { data: profiles, error: profilesError } = await supabaseAdmin
     .from("profiles")
-    .select("id,store_name,full_name,store_address,address")
-    .in("id", vendorIds);
+    .select("id,store_name,full_name,store_address,address,logo_url,role,is_store_open,store_closed_note,store_hours_json")
+    .eq("role", "vendor_food");
 
   if (profilesError) {
     return NextResponse.json(
       { ok: false, error: "Restaurants error: " + profilesError.message, combos: combos ?? [], restaurants: [] },
       { status: 500 }
     );
+  }
+
+  const profileMap = new Map<string, Record<string, unknown>>();
+  for (const row of (profiles as Record<string, unknown>[] | null) ?? []) {
+    profileMap.set(String(row.id || ""), row);
   }
 
   const restaurants: RestaurantRow[] = (profiles || []).map((p: Record<string, unknown>) => {
@@ -66,15 +77,40 @@ export async function GET() {
     const storeAddress = String(p.store_address || "").trim();
     const address = String(p.address || "").trim();
 
+    const availability = evaluateStoreAvailability({
+      isStoreOpen: p.is_store_open as boolean | null | undefined,
+      storeHours: p.store_hours_json,
+      closedNote: String(p.store_closed_note || ""),
+    });
+
     return {
       vendor_id: id,
       name: storeName || fullName || "Vendor",
       area: storeAddress || address || null,
       single_count: counts.get(id) || 0,
+      combo_count: comboCounts.get(id) || 0,
+      logo_url: String(p.logo_url || "").trim() || null,
+      is_open: availability.isOpen,
+      status_label: availability.statusLabel,
     };
   });
 
   restaurants.sort((a, b) => a.name.localeCompare(b.name));
 
-  return NextResponse.json({ ok: true, combos: combos ?? [], restaurants });
+  const combosWithAvailability = ((combos ?? []) as Array<Record<string, unknown>>).map((combo) => {
+    const vendorId = String(combo.vendor_id || "");
+    const vendorProfile = profileMap.get(vendorId) ?? {};
+    const availability = evaluateStoreAvailability({
+      isStoreOpen: vendorProfile.is_store_open as boolean | null | undefined,
+      storeHours: vendorProfile.store_hours_json,
+      closedNote: String(vendorProfile.store_closed_note || ""),
+    });
+    return {
+      ...combo,
+      is_vendor_open: availability.isOpen,
+      vendor_status_label: availability.statusLabel,
+    };
+  });
+
+  return NextResponse.json({ ok: true, combos: combosWithAvailability, restaurants });
 }

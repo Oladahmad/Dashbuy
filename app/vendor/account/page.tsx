@@ -5,6 +5,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  STORE_DAY_KEYS,
+  dayLabel,
+  emptyStoreHours,
+  evaluateStoreAvailability,
+  formatStoreTime,
+  normalizeStoreHours,
+  type StoreDayKey,
+  type StoreHours,
+} from "@/lib/storeHours";
 
 type Role = "customer" | "vendor_food" | "vendor_products" | "admin";
 
@@ -17,6 +27,9 @@ type ProfileRow = {
   store_name: string | null;
 
   logo_url: string | null;
+  is_store_open?: boolean | null;
+  store_closed_note?: string | null;
+  store_hours_json?: unknown;
 
   bank_name: string | null;
   bank_account_number: string | null;
@@ -100,6 +113,9 @@ export default function VendorAccountPage() {
 
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
+  const [isStoreOpen, setIsStoreOpen] = useState(true);
+  const [storeClosedNote, setStoreClosedNote] = useState("");
+  const [storeHours, setStoreHours] = useState<StoreHours>(emptyStoreHours());
 
   const [bankName, setBankName] = useState("");
   const [bankAccountNumber, setBankAccountNumber] = useState("");
@@ -132,6 +148,11 @@ export default function VendorAccountPage() {
     return initialsFromName(base);
   }, [profile]);
 
+  const availability = useMemo(
+    () => evaluateStoreAvailability({ isStoreOpen, storeHours, closedNote: storeClosedNote }),
+    [isStoreOpen, storeHours, storeClosedNote]
+  );
+
   const bankMissing = useMemo(() => {
     return isBlank(bankName) || isBlank(bankAccountNumber) || isBlank(bankAccountName);
   }, [bankName, bankAccountNumber, bankAccountName]);
@@ -162,10 +183,10 @@ export default function VendorAccountPage() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("profiles")
-        .select(
-          "id,role,full_name,phone,address,store_name,logo_url,bank_name,bank_account_number,bank_account_name"
+        const { data, error } = await supabase
+          .from("profiles")
+          .select(
+          "id,role,full_name,phone,address,store_name,logo_url,is_store_open,store_closed_note,store_hours_json,bank_name,bank_account_number,bank_account_name"
         )
         .eq("id", user.id)
         .maybeSingle<ProfileRow>();
@@ -194,6 +215,9 @@ export default function VendorAccountPage() {
       setBankName(data.bank_name ?? "");
       setBankAccountNumber(data.bank_account_number ?? "");
       setBankAccountName(data.bank_account_name ?? "");
+      setIsStoreOpen(data.is_store_open !== false);
+      setStoreClosedNote(data.store_closed_note ?? "");
+      setStoreHours(normalizeStoreHours(data.store_hours_json));
 
       const canUse = isVendorRole(data.role);
       if (!canUse) {
@@ -316,8 +340,10 @@ export default function VendorAccountPage() {
       phone: p,
       address: a,
       store_name: profile.role === "vendor_food" || profile.role === "vendor_products" ? sn : null,
-
       logo_url: logoUrl,
+      is_store_open: profile.role === "vendor_food" ? isStoreOpen : profile.is_store_open ?? true,
+      store_closed_note: profile.role === "vendor_food" ? clean(storeClosedNote) || null : profile.store_closed_note ?? null,
+      store_hours_json: profile.role === "vendor_food" ? storeHours : profile.store_hours_json ?? null,
     };
 
     const { error } = await supabase.from("profiles").update(payload).eq("id", profile.id);
@@ -356,6 +382,9 @@ export default function VendorAccountPage() {
     setBankName(profile.bank_name ?? "");
     setBankAccountNumber(profile.bank_account_number ?? "");
     setBankAccountName(profile.bank_account_name ?? "");
+    setIsStoreOpen(profile.is_store_open !== false);
+    setStoreClosedNote(profile.store_closed_note ?? "");
+    setStoreHours(normalizeStoreHours(profile.store_hours_json));
 
     setLogoFile(null);
 
@@ -467,6 +496,16 @@ export default function VendorAccountPage() {
 
   const showLogo = profile?.logo_url || logoPreviewUrl;
 
+  function updateStoreDay(day: StoreDayKey, patch: Partial<StoreHours[StoreDayKey]>) {
+    setStoreHours((prev) => ({
+      ...prev,
+      [day]: {
+        ...prev[day],
+        ...patch,
+      },
+    }));
+  }
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border bg-white p-4 flex items-start justify-between gap-3">
@@ -517,15 +556,15 @@ export default function VendorAccountPage() {
               ) : null}
             </div>
 
-            <div className="mt-4 flex items-center gap-3">
+            <div className="mt-4 flex items-center gap-4">
               {showLogo ? (
                 <img
                   src={logoPreviewUrl || (profile.logo_url as string)}
                   alt="Logo"
-                  className="h-14 w-14 rounded-2xl object-cover border"
+                  className="h-24 w-24 rounded-full object-cover border"
                 />
               ) : (
-                <div className="h-14 w-14 rounded-2xl border bg-gray-50 flex items-center justify-center text-sm font-semibold">
+                <div className="flex h-24 w-24 items-center justify-center rounded-full border bg-gray-50 text-xl font-semibold">
                   {avatarText}
                 </div>
               )}
@@ -533,6 +572,7 @@ export default function VendorAccountPage() {
               <div className="min-w-0">
                 <p className="text-sm font-semibold truncate">{profile.store_name || profile.full_name || "Dashbuy"}</p>
                 <p className="text-xs text-gray-600 truncate">{profile.address || "Address not set"}</p>
+                <p className="mt-1 text-xs text-gray-500">Add a clear profile photo so customers can recognize your restaurant faster.</p>
               </div>
             </div>
 
@@ -561,15 +601,33 @@ export default function VendorAccountPage() {
             ) : (
               <div className="mt-4 space-y-3">
                 <div>
-                  <label className="text-sm text-gray-700">Logo (optional)</label>
-                  <input
-                    className="mt-2 w-full rounded-xl border px-3 py-3"
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
-                    disabled={saving}
-                  />
-                  <p className="mt-1 text-xs text-gray-500">If you skip this, customers will see your initials.</p>
+                  <label className="text-sm text-gray-700">Profile picture</label>
+                  <div className="mt-2 rounded-3xl border border-dashed p-4">
+                    <div className="flex items-center gap-4">
+                      {showLogo ? (
+                        <img
+                          src={logoPreviewUrl || (profile.logo_url as string)}
+                          alt="Profile preview"
+                          className="h-24 w-24 rounded-full border object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-24 w-24 items-center justify-center rounded-full border bg-gray-50 text-xl font-semibold">
+                          {avatarText}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-900">Upload your restaurant or vendor image</p>
+                        <p className="mt-1 text-xs text-gray-500">Use a clear photo or logo. If you skip this, customers will see your initials.</p>
+                        <input
+                          className="mt-3 w-full rounded-xl border px-3 py-3"
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+                          disabled={saving}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div>
@@ -629,6 +687,122 @@ export default function VendorAccountPage() {
               </div>
             )}
           </div>
+
+          {profile.role === "vendor_food" ? (
+            <div className="rounded-2xl border bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold">Restaurant availability</p>
+                  <p className="mt-1 text-sm text-gray-600">Set when customers can order from your restaurant.</p>
+                </div>
+                <span
+                  className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${
+                    availability.isOpen ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                  }`}
+                >
+                  {availability.statusLabel}
+                </span>
+              </div>
+
+              {!editing ? (
+                <div className="mt-4 space-y-3">
+                  <div className="rounded-xl border bg-gray-50 p-3">
+                    <p className="text-sm font-medium text-gray-900">{availability.detail}</p>
+                  </div>
+                  <div className="grid gap-2">
+                    {STORE_DAY_KEYS.map((day) => {
+                      const row = storeHours[day];
+                      return (
+                        <div key={day} className="flex items-center justify-between rounded-xl border px-3 py-2 text-sm">
+                          <span>{dayLabel(day)}</span>
+                          <span className="text-gray-600">
+                            {row.enabled && row.open && row.close ? `${formatStoreTime(row.open)} - ${formatStoreTime(row.close)}` : "Closed"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 space-y-4">
+                  <div className="rounded-2xl border p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">Accept orders now</p>
+                        <p className="mt-1 text-xs text-gray-500">Turn this off if you want to close your restaurant immediately.</p>
+                      </div>
+                      <button
+                        type="button"
+                        className={`rounded-full px-4 py-2 text-sm font-medium ${
+                          isStoreOpen ? "bg-emerald-600 text-white" : "bg-gray-200 text-gray-800"
+                        }`}
+                        onClick={() => setIsStoreOpen((prev) => !prev)}
+                      >
+                        {isStoreOpen ? "Open" : "Closed"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm text-gray-700">Closed note (optional)</label>
+                    <input
+                      className="mt-1 w-full rounded-xl border px-3 py-3"
+                      placeholder="e.g. Back by 4 PM"
+                      value={storeClosedNote}
+                      onChange={(e) => setStoreClosedNote(e.target.value)}
+                      disabled={saving}
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium text-gray-900">Weekly opening hours</p>
+                    <p className="text-xs text-gray-500">If no day is enabled, your restaurant will appear open until you manually close it.</p>
+                    {STORE_DAY_KEYS.map((day) => {
+                      const row = storeHours[day];
+                      return (
+                        <div key={day} className="rounded-2xl border p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-medium">{dayLabel(day)}</p>
+                            <label className="flex items-center gap-2 text-xs text-gray-600">
+                              <input
+                                type="checkbox"
+                                checked={row.enabled}
+                                onChange={(e) => updateStoreDay(day, { enabled: e.target.checked })}
+                                disabled={saving}
+                              />
+                              Open this day
+                            </label>
+                          </div>
+                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                            <div>
+                              <label className="text-xs text-gray-600">Open</label>
+                              <input
+                                type="time"
+                                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                                value={row.open}
+                                onChange={(e) => updateStoreDay(day, { open: e.target.value })}
+                                disabled={saving || !row.enabled}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-600">Close</label>
+                              <input
+                                type="time"
+                                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                                value={row.close}
+                                onChange={(e) => updateStoreDay(day, { close: e.target.value })}
+                                disabled={saving || !row.enabled}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
 
           {/* Payout */}
           <div className="rounded-2xl border bg-white p-4 space-y-3">

@@ -7,6 +7,11 @@ type Vendor = {
   id: string;
   store_name: string | null;
   full_name: string | null;
+  availability?: {
+    isOpen: boolean;
+    statusLabel: string;
+    detail: string;
+  };
 };
 
 type Plate = { id: string; name: string; plate_fee: number };
@@ -150,10 +155,10 @@ function BuildPlatePageInner() {
       const body = (await res.json()) as {
         ok?: boolean;
         error?: string;
-        vendor?: Vendor | null;
-        plates?: Plate[];
-        items?: FoodItem[];
-        variants?: Variant[];
+            vendor?: Vendor | null;
+            plates?: Plate[];
+            items?: FoodItem[];
+            variants?: Variant[];
       };
 
       if (!res.ok || !body.ok || !body.vendor) {
@@ -410,6 +415,10 @@ function BuildPlatePageInner() {
       <section className="rounded-2xl border bg-white p-4">
         <h1 className="text-xl font-bold sm:text-2xl">Build Plate</h1>
         <p className="mt-1 text-sm text-gray-600">{vendorDisplayName(vendor)}</p>
+        <p className={`mt-2 text-xs font-medium ${vendor?.availability?.isOpen === false ? "text-red-600" : "text-emerald-700"}`}>
+          {vendor?.availability?.statusLabel ?? "Open now"}
+        </p>
+        {vendor?.availability?.detail ? <p className="mt-1 text-xs text-gray-500">{vendor.availability.detail}</p> : null}
       </section>
 
       <section className="rounded-2xl border bg-white p-4">
@@ -588,10 +597,11 @@ function BuildPlatePageInner() {
 
           <button
             type="button"
-            className="rounded-xl bg-black px-4 py-3 text-sm text-white"
+            className="rounded-xl bg-black px-4 py-3 text-sm text-white disabled:opacity-50"
             onClick={addToCart}
+            disabled={vendor?.availability?.isOpen === false}
           >
-            {editingPlateAt ? "Update plate in cart" : "Add plate to cart"}
+            {vendor?.availability?.isOpen === false ? "Restaurant closed" : editingPlateAt ? "Update plate in cart" : "Add plate to cart"}
           </button>
         </div>
       </section>

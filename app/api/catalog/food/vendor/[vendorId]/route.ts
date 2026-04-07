@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { evaluateStoreAvailability } from "@/lib/storeHours";
 
 type Params = {
   params: Promise<{ vendorId: string }>;
@@ -10,20 +11,20 @@ export async function GET(_: Request, { params }: Params) {
 
   if (!vendorId) {
     return NextResponse.json(
-      { ok: false, error: "Missing vendor id", vendor: null, plates: [], items: [], variants: [] },
+      { ok: false, error: "Missing vendor id", vendor: null, plates: [], items: [], variants: [], combos: [] },
       { status: 400 }
     );
   }
 
   const { data: vendor, error: vendorError } = await supabaseAdmin
     .from("profiles")
-    .select("id,store_name,full_name,store_address,address,phone,logo_url")
+    .select("id,store_name,full_name,store_address,address,phone,logo_url,is_store_open,store_closed_note,store_hours_json")
     .eq("id", vendorId)
     .maybeSingle();
 
   if (vendorError || !vendor) {
     return NextResponse.json(
-      { ok: false, error: "Vendor not found", vendor: null, plates: [], items: [], variants: [] },
+      { ok: false, error: "Vendor not found", vendor: null, plates: [], items: [], variants: [], combos: [] },
       { status: 404 }
     );
   }
@@ -40,7 +41,22 @@ export async function GET(_: Request, { params }: Params) {
       ? "Database update needed: add vendor_id column to plate_templates first."
       : platesError.message;
     return NextResponse.json(
-      { ok: false, error: "Plates error: " + plateErrorMessage, vendor, plates: [], items: [], variants: [] },
+      { ok: false, error: "Plates error: " + plateErrorMessage, vendor, plates: [], items: [], variants: [], combos: [] },
+      { status: 500 }
+    );
+  }
+
+  const { data: combos, error: combosError } = await supabaseAdmin
+    .from("food_items")
+    .select("id,name,price,image_url,short_description,is_available")
+    .eq("vendor_id", vendorId)
+    .eq("food_type", "combo")
+    .eq("is_available", true)
+    .order("created_at", { ascending: false });
+
+  if (combosError) {
+    return NextResponse.json(
+      { ok: false, error: "Combos error: " + combosError.message, vendor, plates: plates ?? [], items: [], variants: [], combos: [] },
       { status: 500 }
     );
   }
@@ -58,7 +74,7 @@ export async function GET(_: Request, { params }: Params) {
 
   if (itemsError) {
     return NextResponse.json(
-      { ok: false, error: "Menu error: " + itemsError.message, vendor, plates: plates ?? [], items: [], variants: [] },
+      { ok: false, error: "Menu error: " + itemsError.message, vendor, plates: plates ?? [], items: [], variants: [], combos: combos ?? [] },
       { status: 500 }
     );
   }
@@ -82,6 +98,7 @@ export async function GET(_: Request, { params }: Params) {
           error: "Variants error: " + variantsError.message,
           vendor,
           plates: plates ?? [],
+          combos: combos ?? [],
           items: items ?? [],
           variants: [],
         },
@@ -94,8 +111,16 @@ export async function GET(_: Request, { params }: Params) {
 
   return NextResponse.json({
     ok: true,
-    vendor,
+    vendor: {
+      ...vendor,
+      availability: evaluateStoreAvailability({
+        isStoreOpen: vendor?.is_store_open as boolean | null | undefined,
+        storeHours: vendor?.store_hours_json,
+        closedNote: String(vendor?.store_closed_note || ""),
+      }),
+    },
     plates: plates ?? [],
+    combos: combos ?? [],
     items: items ?? [],
     variants,
   });

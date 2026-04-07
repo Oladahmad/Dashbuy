@@ -10,6 +10,8 @@ type ComboRow = {
   short_description: string | null;
   vendor_id: string;
   profiles: { store_name: string | null; full_name: string | null } | null;
+  is_vendor_open?: boolean;
+  vendor_status_label?: string;
 };
 
 type RestaurantRow = {
@@ -17,6 +19,10 @@ type RestaurantRow = {
   name: string;
   area: string | null;
   single_count: number;
+  combo_count: number;
+  logo_url: string | null;
+  is_open: boolean;
+  status_label: string;
 };
 
 type ComboCartItem = {
@@ -75,6 +81,15 @@ function pickVendorName(p: { store_name: string | null; full_name: string | null
   const f = (p?.full_name || "").trim();
   if (f) return f;
   return "Vendor";
+}
+
+function initialsFromName(value: string) {
+  const clean = value.trim();
+  if (!clean) return "DB";
+  const parts = clean.split(/\s+/).filter(Boolean);
+  const first = parts[0]?.[0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
+  return (first + last).toUpperCase() || "DB";
 }
 
 export default function FoodHubPage() {
@@ -137,6 +152,10 @@ export default function FoodHubPage() {
   }, [combos, q]);
 
   function addComboToCart(combo: ComboRow) {
+    if (combo.is_vendor_open === false) {
+      alert(`${pickVendorName(combo.profiles)} is currently closed.`);
+      return;
+    }
     if (!combo.vendor_id) return;
     const cart = readFoodCart();
 
@@ -219,6 +238,9 @@ export default function FoodHubPage() {
                     <div className="p-3">
                       <p className="font-semibold text-sm">{c.name}</p>
                       <p className="mt-1 text-xs text-gray-500">{vendorName}</p>
+                      <p className={`mt-1 text-xs font-medium ${c.is_vendor_open === false ? "text-red-600" : "text-emerald-700"}`}>
+                        {c.vendor_status_label ?? (c.is_vendor_open === false ? "Closed" : "Open now")}
+                      </p>
                       <p className="mt-2 font-bold text-sm">{naira(Number(c.price ?? 0))}</p>
                       {c.short_description ? (
                         <p className="mt-1 text-xs text-gray-600 line-clamp-2">{c.short_description}</p>
@@ -227,11 +249,12 @@ export default function FoodHubPage() {
                   </button>
                   <div className="px-3 pb-3">
                     <button
-                      className="w-full rounded-xl bg-black px-3 py-2 text-white text-sm"
+                      className="w-full rounded-xl bg-black px-3 py-2 text-white text-sm disabled:opacity-50"
                       onClick={() => addComboToCart(c)}
                       type="button"
+                      disabled={c.is_vendor_open === false}
                     >
-                      Add
+                      {c.is_vendor_open === false ? "Closed" : "Add"}
                     </button>
                   </div>
                 </div>
@@ -242,18 +265,33 @@ export default function FoodHubPage() {
       ) : (
         <div className="mt-4 grid gap-3">
           {restaurants.map((r) => (
-            <a
+              <a
               key={r.vendor_id}
               href={`/food/vendors/${r.vendor_id}`}
-              className="rounded-2xl border bg-white p-4 flex items-center justify-between"
+              className="rounded-2xl border bg-white p-4 flex items-center justify-between gap-3"
             >
-              <div>
-                <p className="font-semibold">{r.name}</p>
-                <p className="text-xs text-gray-500">{r.area ?? "Ago"}</p>
+              <div className="flex min-w-0 items-center gap-3">
+                {r.logo_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={r.logo_url} alt={r.name} className="h-14 w-14 shrink-0 rounded-full border object-cover" />
+                ) : (
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border bg-gray-50 text-sm font-semibold text-gray-700">
+                    {initialsFromName(r.name)}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{r.name}</p>
+                  <p className="text-xs text-gray-500">{r.area ?? "Ago"}</p>
+                  <p className={`mt-1 text-xs font-medium ${r.is_open ? "text-emerald-700" : "text-red-600"}`}>
+                    {r.status_label}
+                  </p>
+                </div>
               </div>
               <div className="text-right">
-                <p className="text-sm font-bold">{r.single_count}</p>
-                <p className="text-xs text-gray-500">single foods</p>
+                <p className="text-sm font-bold">{r.single_count > 0 ? r.single_count : r.combo_count}</p>
+                <p className="text-xs text-gray-500">
+                  {r.single_count > 0 ? "single foods" : r.combo_count > 0 ? "combos" : "no food yet"}
+                </p>
               </div>
             </a>
           ))}
@@ -308,10 +346,11 @@ export default function FoodHubPage() {
                 </button>
                 <button
                   type="button"
-                  className="flex-1 rounded-xl bg-black px-4 py-3 text-white text-sm"
+                  className="flex-1 rounded-xl bg-black px-4 py-3 text-white text-sm disabled:opacity-50"
                   onClick={() => addComboToCart(selectedCombo)}
+                  disabled={selectedCombo.is_vendor_open === false}
                 >
-                  Add to cart
+                  {selectedCombo.is_vendor_open === false ? "Restaurant closed" : "Add to cart"}
                 </button>
               </div>
             </div>
