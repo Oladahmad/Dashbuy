@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
-import { parseManualLogisticsNotes, stripLogisticsMeta } from "@/lib/manualLogistics";
 
 type JobStatus = "pending_pickup" | "picked_up" | "delivered" | "cancelled";
 
@@ -43,14 +42,11 @@ type OrderItemLine = {
   imageUrl?: string | null;
 };
 
-type VendorProfile = {
-  id: string;
-  full_name: string | null;
-  phone: string | null;
-  address: string | null;
-  store_address: string | null;
-  store_name: string | null;
-};
+function preferPositive(primary: unknown, fallback: unknown) {
+  const first = safeNumber(primary, 0);
+  if (first > 0) return first;
+  return safeNumber(fallback, 0);
+}
 
 function safeNumber(x: unknown, fallback = 0) {
   if (typeof x === "number" && Number.isFinite(x)) return x;
@@ -120,7 +116,6 @@ export default function LogisticsPage() {
   const [selectedItemsLoading, setSelectedItemsLoading] = useState(false);
   const [selectedApiTotal, setSelectedApiTotal] = useState<number | null>(null);
   const [riderMapUrl, setRiderMapUrl] = useState("");
-
   useEffect(() => {
     let alive = true;
 
@@ -128,146 +123,30 @@ export default function LogisticsPage() {
       setLoading(true);
       setMsg(null);
 
-      const { data: u } = await supabase.auth.getUser();
-      const user = u.user;
-
-      if (!user) {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (sessionErr || !token) {
         if (alive) {
           setMsg("Not signed in");
           setLoading(false);
         }
         return;
       }
-
-      const { data: prof, error: pErr } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (pErr) {
-        if (alive) {
-          setMsg("Profile error: " + pErr.message);
-          setLoading(false);
-        }
-        return;
-      }
-
-      const role = String(prof?.role ?? "");
-      if (role !== "logistics" && role !== "admin") {
-        if (alive) {
-          setMsg("You are not authorized for logistics");
-          setLoading(false);
-        }
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("logistics_jobs")
-        .select(
-          "id,order_id,vendor_id,customer_id,status,created_at,vendor_name,vendor_phone,vendor_address,customer_name,customer_phone,delivery_address,order_type,food_mode,order_total"
-        )
-        .order("created_at", { ascending: false });
+      const resp = await fetch("/api/logistics/jobs?status=active", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = (await resp.json().catch(() => null)) as { ok?: boolean; error?: string; jobs?: LogisticsJobRow[] } | null;
 
       if (!alive) return;
 
-      if (error) {
-        setMsg(error.message);
+      if (!resp.ok || !body?.ok || !Array.isArray(body.jobs)) {
+        setMsg(body?.error ?? "Failed to load logistics jobs");
         setJobs([]);
         setLoading(false);
         return;
       }
 
-      const rows = (data ?? []) as LogisticsJobRow[];
-
-      const orderIds = Array.from(
-        new Set(
-          rows
-            .map((r) => cleanText(r.order_id))
-            .filter((x) => x.length > 0)
-        )
-      );
-
-      const orderNoteMap = new Map<string, string>();
-      const orderDeliveryFeeMap = new Map<string, number>();
-      const orderTotalMap = new Map<string, number>();
-      if (orderIds.length > 0) {
-        const { data: orderRows, error: orderErr } = await supabase
-          .from("orders")
-          .select("id,notes,delivery_fee,total,total_amount")
-          .in("id", orderIds);
-
-        if (!orderErr && orderRows) {
-          for (const o of orderRows as Array<{ id: string; notes: string | null; delivery_fee: number | null; total: number | null; total_amount: number | null }>) {
-            orderNoteMap.set(o.id, cleanText(o.notes));
-            orderDeliveryFeeMap.set(o.id, safeNumber(o.delivery_fee, 0));
-            orderTotalMap.set(o.id, safeNumber(o.total_amount ?? o.total, 0));
-          }
-        }
-      }
-
-      const vendorIds = Array.from(
-        new Set(
-          rows
-            .map((r) => r.vendor_id)
-            .filter((x) => cleanText(x).length > 0)
-        )
-      );
-
-      const vendorMap = new Map<string, VendorProfile>();
-
-      if (vendorIds.length > 0) {
-        const { data: vendors, error: vErr } = await supabase
-          .from("profiles")
-          .select("id,full_name,phone,address,store_address,store_name")
-          .in("id", vendorIds);
-
-        if (!vErr && vendors) {
-          for (const v of vendors as VendorProfile[]) {
-            vendorMap.set(v.id, v);
-          }
-        }
-      }
-
-      const merged = rows.map((j) => {
-        const v = vendorMap.get(j.vendor_id);
-
-        const vendorName =
-          cleanText(j.vendor_name) ||
-          cleanText(v?.store_name) ||
-          cleanText(v?.full_name) ||
-          "";
-
-        const vendorPhone =
-          cleanText(j.vendor_phone) ||
-          cleanText(v?.phone) ||
-          "";
-
-        const vendorAddress =
-          cleanText(j.vendor_address) ||
-          cleanText(v?.store_address) ||
-          cleanText(v?.address) ||
-          "";
-
-        const note = orderNoteMap.get(j.order_id) || "";
-        const manual = parseManualLogisticsNotes(note);
-        const cleanedNote = stripLogisticsMeta(note);
-        const riderMapUrlFromNote = manual.riderMapUrl?.trim() || "";
-
-        return {
-          ...j,
-          vendor_name: vendorName || null,
-          vendor_phone: vendorPhone || null,
-          vendor_address: vendorAddress || null,
-          customer_name: manual.isManual && manual.source !== "vendor" ? manual.customerName || j.customer_name : j.customer_name,
-          customer_note: manual.isManual && manual.source !== "vendor" ? manual.itemsText || null : cleanedNote || null,
-          rider_map_url: riderMapUrlFromNote || null,
-          delivery_fee: orderDeliveryFeeMap.get(j.order_id) ?? 0,
-          order_total: safeNumber(j.order_total, orderTotalMap.get(j.order_id) ?? 0),
-        };
-      });
-
-      setJobs(merged);
+      setJobs(body.jobs);
       setLoading(false);
     }
 
@@ -363,7 +242,11 @@ export default function LogisticsPage() {
       body: JSON.stringify({ jobId: job.id, nextStatus: next, riderMapUrl: (nextRiderMapUrl ?? "").trim() }),
     });
 
-    const body = (await resp.json()) as { ok?: boolean; error?: string };
+    const body = (await resp.json()) as {
+      ok?: boolean;
+      error?: string;
+      payout?: { ok?: boolean; skipped?: boolean; message?: string; error?: string };
+    };
     if (!resp.ok || !body.ok) {
       setSaving(false);
       setMsg(body.error ?? "Status update failed");
@@ -442,15 +325,15 @@ export default function LogisticsPage() {
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
-          <div className="rounded-xl border p-3">
-            <p className="text-xs text-gray-600">Orders to deliver</p>
-            <p className="mt-1 text-lg font-semibold">{toDeliverCount}</p>
-          </div>
+            <div className="rounded-xl border p-3">
+              <p className="text-xs text-gray-600">Orders to deliver</p>
+              <p className="mt-1 text-lg font-semibold">{toDeliverCount}</p>
+            </div>
 
-          <div className="rounded-xl border p-3">
-            <p className="text-xs text-gray-600">Delivery successful</p>
-            <p className="mt-1 text-lg font-semibold">{deliveredCount}</p>
-          </div>
+            <div className="rounded-xl border p-3">
+              <p className="text-xs text-gray-600">Delivery successful</p>
+              <p className="mt-1 text-lg font-semibold">{deliveredCount}</p>
+            </div>
 
           <div className="rounded-xl border p-3">
             <p className="text-xs text-gray-600">Amount made</p>
@@ -467,7 +350,7 @@ export default function LogisticsPage() {
         ) : (
           <div className="space-y-2">
             {list.map((j) => {
-              const gross = safeNumber(j.order_total, 0);
+              const gross = preferPositive(j.order_total, 0);
 
               const vendorName = cleanText(j.vendor_name) ? j.vendor_name : "Vendor";
               const vendorPhone = cleanText(j.vendor_phone) ? j.vendor_phone : "No vendor phone";

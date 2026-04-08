@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useParams, useRouter } from "next/navigation";
+import { parseManualLogisticsNotes } from "@/lib/manualLogistics";
 
 type JobStatus = "pending_pickup" | "picked_up" | "delivered" | "cancelled";
 
@@ -54,6 +55,12 @@ function safeNumber(x: unknown, fallback = 0) {
   return fallback;
 }
 
+function preferPositive(primary: unknown, fallback: unknown) {
+  const first = safeNumber(primary, 0);
+  if (first > 0) return first;
+  return safeNumber(fallback, 0);
+}
+
 function naira(n: number) {
   const v = Math.max(0, Math.floor(n));
   return "₦" + v.toLocaleString();
@@ -96,95 +103,48 @@ export default function HistoryDetailsPage() {
       setItems([]);
       setApiTotal(null);
 
-      const { data: u } = await supabase.auth.getUser();
-      const user = u.user;
-
-      if (!user) {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (sessionErr || !token) {
         if (alive) {
           setMsg("Not signed in");
           setLoading(false);
         }
         return;
       }
-
-      const { data: prof, error: pErr } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (pErr) {
-        if (alive) {
-          setMsg("Profile error: " + pErr.message);
-          setLoading(false);
-        }
-        return;
-      }
-
-      const role = String(prof?.role ?? "");
-      if (role !== "logistics" && role !== "admin") {
-        if (alive) {
-          setMsg("You are not authorized for logistics");
-          setLoading(false);
-        }
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("logistics_jobs")
-        .select(
-          "id,order_id,vendor_id,customer_id,status,created_at,updated_at,vendor_name,vendor_phone,vendor_address,customer_name,customer_phone,delivery_address,order_type,food_mode,order_total"
-        )
-        .eq("id", id)
-        .maybeSingle();
+      const resp = await fetch(`/api/logistics/jobs/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = (await resp.json().catch(() => null)) as { ok?: boolean; error?: string; job?: LogisticsJobRow } | null;
 
       if (!alive) return;
 
-      if (error) {
-        setMsg(error.message);
+      if (!resp.ok || !body?.ok || !body.job) {
+        setMsg(body?.error ?? "History item not found");
         setLoading(false);
         return;
       }
 
-      if (!data) {
-        setMsg("History item not found");
-        setLoading(false);
-        return;
-      }
-
-      const row = data as LogisticsJobRow;
-
-      const { data: orderRow, error: orderErr } = await supabase
-        .from("orders")
-        .select("notes")
-        .eq("id", row.order_id)
-        .maybeSingle();
-
-      if (!orderErr && orderRow) {
-        row.customer_note = cleanText((orderRow as { notes: string | null }).notes) || null;
-      }
+      const row = body.job;
 
       setJob(row);
       setItemsLoading(true);
-      const token = (await supabase.auth.getSession()).data.session?.access_token;
-      if (token) {
-        const itemsResp = await fetch("/api/orders/items", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ orderId: row.order_id }),
-        });
-        const itemsBody = (await itemsResp.json().catch(() => null)) as
-          | { ok?: boolean; items?: OrderItemLine[]; order?: { total?: number } }
-          | null;
-        if (itemsResp.ok && itemsBody?.ok && Array.isArray(itemsBody.items)) {
-          setItems(itemsBody.items);
-        }
-        if (itemsResp.ok && itemsBody?.ok) {
-          setApiTotal(safeNumber(itemsBody.order?.total, 0));
-        }
+      const itemsResp = await fetch("/api/orders/items", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ orderId: row.order_id }),
+      });
+      const itemsBody = (await itemsResp.json().catch(() => null)) as
+        | { ok?: boolean; items?: OrderItemLine[]; order?: { total?: number } }
+        | null;
+      if (itemsResp.ok && itemsBody?.ok && Array.isArray(itemsBody.items)) {
+        setItems(itemsBody.items);
+      }
+      if (itemsResp.ok && itemsBody?.ok) {
+        setApiTotal(safeNumber(itemsBody.order?.total, 0));
       }
       setItemsLoading(false);
       setLoading(false);

@@ -11,9 +11,15 @@ type Summary = {
   withdrawable: number;
 };
 
+type Bank = {
+  name: string;
+  code: string;
+};
+
 type ProfileLite = {
   id: string;
   role: string | null;
+  bank_code?: string | null;
   bank_name: string | null;
   bank_account_number: string | null;
   bank_account_name: string | null;
@@ -37,15 +43,19 @@ export default function VendorWithdrawPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [profile, setProfile] = useState<ProfileLite | null>(null);
   const [editingBank, setEditingBank] = useState(false);
+  const [banks, setBanks] = useState<Bank[]>([]);
 
+  const [bankCode, setBankCode] = useState("");
   const [bankName, setBankName] = useState("");
   const [bankAccountNumber, setBankAccountNumber] = useState("");
   const [bankAccountName, setBankAccountName] = useState("");
   const [dailyAutoOn, setDailyAutoOn] = useState(true);
+  const [resolvingAccount, setResolvingAccount] = useState(false);
+  const [accountResolved, setAccountResolved] = useState(false);
 
   const bankMissing = useMemo(
-    () => !clean(bankName) || !clean(bankAccountNumber) || !clean(bankAccountName),
-    [bankName, bankAccountNumber, bankAccountName]
+    () => !clean(bankCode) || !clean(bankName) || !clean(bankAccountNumber) || !clean(bankAccountName),
+    [bankCode, bankName, bankAccountNumber, bankAccountName]
   );
 
   async function loadAll() {
@@ -64,7 +74,7 @@ export default function VendorWithdrawPage() {
 
     const { data: prof, error: pErr } = await supabase
       .from("profiles")
-      .select("id,role,bank_name,bank_account_number,bank_account_name")
+      .select("id,role,bank_code,bank_name,bank_account_number,bank_account_name")
       .eq("id", user.id)
       .maybeSingle<ProfileLite>();
 
@@ -80,9 +90,22 @@ export default function VendorWithdrawPage() {
     }
 
     setProfile(prof);
+    setBankCode(prof.bank_code ?? "");
     setBankName(prof.bank_name ?? "");
     setBankAccountNumber(prof.bank_account_number ?? "");
     setBankAccountName(prof.bank_account_name ?? "");
+    setAccountResolved(!!(prof.bank_code && prof.bank_account_name && prof.bank_account_number));
+
+    const banksRes = await fetch("/api/payouts/banks", { cache: "no-store" });
+    const banksBody = (await banksRes.json().catch(() => null)) as
+      | { ok?: boolean; error?: string; banks?: Bank[] }
+      | null;
+    if (!banksRes.ok || !banksBody?.ok || !Array.isArray(banksBody.banks)) {
+      setErr(banksBody?.error ?? "Failed to load banks.");
+      setLoading(false);
+      return;
+    }
+    setBanks(banksBody.banks);
 
     const summaryRes = await fetch("/api/payouts/summary", {
       headers: { Authorization: `Bearer ${token}` },
@@ -109,13 +132,16 @@ export default function VendorWithdrawPage() {
 
   async function saveBankDetails() {
     if (!profile) return;
+    const bc = clean(bankCode);
     const bn = clean(bankName);
     const bac = clean(bankAccountNumber);
     const ban = clean(bankAccountName);
 
+    if (!bc) return setErr("Select a bank.");
     if (!bn) return setErr("Bank name is required.");
     if (!bac || bac.length < 10) return setErr("Enter a valid account number.");
     if (!ban) return setErr("Account name is required.");
+    if (!accountResolved) return setErr("Resolve the account name first before saving.");
 
     setSavingBank(true);
     setErr(null);
@@ -124,6 +150,7 @@ export default function VendorWithdrawPage() {
     const { error } = await supabase
       .from("profiles")
       .update({
+        bank_code: bc,
         bank_name: bn,
         bank_account_number: bac,
         bank_account_name: ban,
@@ -135,6 +162,7 @@ export default function VendorWithdrawPage() {
 
     setProfile({
       ...profile,
+      bank_code: bc,
       bank_name: bn,
       bank_account_number: bac,
       bank_account_name: ban,
@@ -152,6 +180,38 @@ export default function VendorWithdrawPage() {
   useEffect(() => {
     localStorage.setItem("dashbuy_vendor_daily_auto_withdraw", dailyAutoOn ? "on" : "off");
   }, [dailyAutoOn]);
+
+  async function resolveAccountName() {
+    const bc = clean(bankCode);
+    const bac = clean(bankAccountNumber);
+    if (!bc) return setErr("Select a bank first.");
+    if (bac.length !== 10) return setErr("Enter a valid 10-digit account number.");
+
+    setResolvingAccount(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/payouts/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bankCode: bc, accountNumber: bac }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { ok?: boolean; error?: string; accountName?: string }
+        | null;
+      if (!res.ok || !body?.ok || !body.accountName) {
+        throw new Error(body?.error ?? "Could not resolve account name.");
+      }
+      setBankAccountName(body.accountName);
+      setAccountResolved(true);
+      setMsg("Account name found successfully.");
+    } catch (e: unknown) {
+      setAccountResolved(false);
+      setErr(e instanceof Error ? e.message : "Could not resolve account name.");
+    } finally {
+      setResolvingAccount(false);
+    }
+  }
 
   return (
     <main className="p-4 max-w-3xl mx-auto space-y-4">
@@ -225,29 +285,71 @@ export default function VendorWithdrawPage() {
             </div>
 
             {!editingBank ? (
-              <div className="space-y-1 text-sm">
-                <p><span className="text-gray-600">Bank:</span> {profile?.bank_name || "Not set"}</p>
-                <p><span className="text-gray-600">Account number:</span> {profile?.bank_account_number || "Not set"}</p>
-                <p><span className="text-gray-600">Account name:</span> {profile?.bank_account_name || "Not set"}</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div>
-                  <label className="text-sm text-gray-700">Bank name</label>
-                  <input className="mt-1 w-full rounded-xl border px-3 py-3" value={bankName} onChange={(e) => setBankName(e.target.value)} />
+                <div className="space-y-1 text-sm">
+                  <p><span className="text-gray-600">Bank code:</span> {profile?.bank_code || "Not set"}</p>
+                  <p><span className="text-gray-600">Bank:</span> {profile?.bank_name || "Not set"}</p>
+                  <p><span className="text-gray-600">Account number:</span> {profile?.bank_account_number || "Not set"}</p>
+                  <p><span className="text-gray-600">Account name:</span> {profile?.bank_account_name || "Not set"}</p>
                 </div>
+              ) : (
+              <div className="space-y-3">
                 <div>
                   <label className="text-sm text-gray-700">Account number</label>
                   <input
                     className="mt-1 w-full rounded-xl border px-3 py-3"
                     value={bankAccountNumber}
-                    onChange={(e) => setBankAccountNumber(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                    onChange={(e) => {
+                      setBankAccountNumber(e.target.value.replace(/\D/g, "").slice(0, 10));
+                      setAccountResolved(false);
+                    }}
                     inputMode="numeric"
+                    placeholder="Enter 10-digit account number"
                   />
                 </div>
                 <div>
+                  <label className="text-sm text-gray-700">Bank</label>
+                  <select
+                    className="mt-1 w-full rounded-xl border px-3 py-3"
+                    value={bankCode}
+                    onChange={(e) => {
+                      const code = e.target.value;
+                      const bank = banks.find((item) => item.code === code);
+                      setBankCode(code);
+                      setBankName(bank?.name ?? "");
+                      setAccountResolved(false);
+                    }}
+                  >
+                    <option value="">Select bank</option>
+                    {banks.map((bank) => (
+                      <option key={bank.code} value={bank.code}>
+                        {bank.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
                   <label className="text-sm text-gray-700">Account name</label>
-                  <input className="mt-1 w-full rounded-xl border px-3 py-3" value={bankAccountName} onChange={(e) => setBankAccountName(e.target.value)} />
+                  <div className="mt-1 flex gap-2">
+                    <input
+                      className="w-full rounded-xl border px-3 py-3"
+                      value={bankAccountName}
+                      onChange={(e) => {
+                        setBankAccountName(e.target.value);
+                        setAccountResolved(false);
+                      }}
+                      placeholder="Resolve account name"
+                      readOnly
+                    />
+                    <button
+                      type="button"
+                      className="rounded-xl border px-4 py-3 text-sm"
+                      onClick={resolveAccountName}
+                      disabled={savingBank || resolvingAccount || !bankCode || bankAccountNumber.length !== 10}
+                    >
+                      {resolvingAccount ? "Checking..." : "Check name"}
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">Enter account number, choose bank, then check the account name before saving.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -256,9 +358,11 @@ export default function VendorWithdrawPage() {
                     disabled={savingBank}
                     onClick={() => {
                       setEditingBank(false);
+                      setBankCode(profile?.bank_code ?? "");
                       setBankName(profile?.bank_name ?? "");
                       setBankAccountNumber(profile?.bank_account_number ?? "");
                       setBankAccountName(profile?.bank_account_name ?? "");
+                      setAccountResolved(!!(profile?.bank_code && profile?.bank_account_number && profile?.bank_account_name));
                     }}
                   >
                     Cancel
@@ -266,7 +370,7 @@ export default function VendorWithdrawPage() {
                   <button
                     type="button"
                     className="rounded-xl bg-black px-4 py-3 text-sm text-white disabled:opacity-60"
-                    disabled={savingBank || bankMissing}
+                    disabled={savingBank || bankMissing || !accountResolved}
                     onClick={saveBankDetails}
                   >
                     {savingBank ? "Saving..." : "Save"}
@@ -297,4 +401,3 @@ export default function VendorWithdrawPage() {
     </main>
   );
 }
-

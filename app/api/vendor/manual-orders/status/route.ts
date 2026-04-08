@@ -67,6 +67,11 @@ export async function POST(req: NextRequest) {
     const { error: updateErr } = await supabaseAdmin.from("orders").update({ status: nextStatus }).eq("id", order.id);
     if (updateErr) return NextResponse.json({ ok: false, error: updateErr.message }, { status: 500 });
 
+    const { error: cleanupErr } = await supabaseAdmin.from("logistics_jobs").delete().eq("order_id", order.id);
+    if (cleanupErr) {
+      return NextResponse.json({ ok: false, error: "Manual order updated but logistics cleanup failed: " + cleanupErr.message }, { status: 500 });
+    }
+
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json(

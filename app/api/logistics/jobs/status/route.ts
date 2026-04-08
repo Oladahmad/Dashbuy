@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { notifyOrderEvent } from "@/lib/orderNotifications";
 import { upsertRiderMapInNotes } from "@/lib/manualLogistics";
+import { triggerVendorPickupPayout } from "@/lib/vendorAutoPayout";
 
 type JobStatus = "pending_pickup" | "picked_up" | "delivered" | "cancelled";
 
@@ -159,7 +160,13 @@ export async function POST(req: Request) {
       );
     }
 
+    let payoutResult:
+      | { ok: true; skipped?: boolean; message?: string; amount?: number; reference?: string; vendorName?: string }
+      | { ok: false; error: string }
+      | null = null;
+
     if (nextStatus === "picked_up") {
+      payoutResult = await triggerVendorPickupPayout(job.order_id);
       await notifyOrderEvent({
         event: "delivery_out",
         orderId: job.order_id,
@@ -185,6 +192,7 @@ export async function POST(req: Request) {
       ok: true,
       job: { id: job.id, status: nextStatus },
       order: { id: job.order_id, status: orderStatus },
+      payout: payoutResult,
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Server error";

@@ -9,6 +9,14 @@ type Payout = {
   amount: number;
   created_at: string;
   reference: string | null;
+  order_id?: string | null;
+  status?: string | null;
+  type?: string | null;
+  bank_name?: string | null;
+  bank_code?: string | null;
+  account_number?: string | null;
+  squad_transfer_reference?: string | null;
+  squad_requery_status?: string | null;
 };
 
 function naira(n: number) {
@@ -28,6 +36,18 @@ function emergencyAmount(reference: string | null) {
   const m = ref.match(/emergency_request_[^_]+_\d+_(\d+)$/i);
   if (!m) return 0;
   return Number(m[1] ?? 0);
+}
+
+function statusLabel(row: Payout) {
+  const type = String(row.type ?? "").toLowerCase();
+  const status = String(row.status ?? "").toLowerCase();
+  if (type === "emergency_request") return "Request sent";
+  if (status === "successful") return "Successful";
+  if (status === "failed") return "Failed";
+  if (status === "reversed") return "Reversed";
+  if (status === "initiated") return "Initiated";
+  if (row.squad_requery_status) return row.squad_requery_status;
+  return "Recorded";
 }
 
 export default function VendorWithdrawHistoryPage() {
@@ -90,7 +110,9 @@ export default function VendorWithdrawHistoryPage() {
           ) : (
             <div className="grid gap-2">
               {rows.map((p) => {
-                const isEmergency = String(p.reference ?? "").startsWith("emergency_request_");
+                const isEmergency =
+                  String(p.type ?? "").toLowerCase() === "emergency_request" ||
+                  String(p.reference ?? "").startsWith("emergency_request_");
                 const reqAmount = emergencyAmount(p.reference);
                 return (
                   <div key={p.id} className="rounded-xl border p-3">
@@ -100,9 +122,13 @@ export default function VendorWithdrawHistoryPage() {
                       </p>
                       <p className="text-xs text-gray-600">{fmtDate(p.created_at)}</p>
                     </div>
-                    <p className="mt-1 text-xs text-gray-600">
-                      {isEmergency ? "Status: Request sent" : "Status: Withdrawn"}
-                    </p>
+                    <p className="mt-1 text-xs text-gray-600">Status: {statusLabel(p)}</p>
+                    {p.order_id ? <p className="mt-1 text-xs text-gray-600">Order: {p.order_id.slice(0, 8)}</p> : null}
+                    {p.bank_name ? <p className="mt-1 text-xs text-gray-600">Bank: {p.bank_name}</p> : null}
+                    {p.account_number ? <p className="mt-1 text-xs text-gray-600">Account: {p.account_number}</p> : null}
+                    {p.squad_transfer_reference ? (
+                      <p className="mt-1 text-xs text-gray-600">Squad ref: {p.squad_transfer_reference}</p>
+                    ) : null}
                     {p.reference ? <p className="mt-1 text-xs text-gray-600">Ref: {p.reference}</p> : null}
                   </div>
                 );
@@ -114,4 +140,3 @@ export default function VendorWithdrawHistoryPage() {
     </main>
   );
 }
-

@@ -27,6 +27,14 @@ function friendlyStatus(status: string | null) {
   return String(status ?? "").replace(/_/g, " ").trim() || "pending vendor";
 }
 
+const STATUS_STEPS = ["pending_vendor", "accepted", "picked_up", "delivered"] as const;
+
+function statusStepIndex(status: string | null) {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  const idx = STATUS_STEPS.indexOf(normalized as (typeof STATUS_STEPS)[number]);
+  return idx >= 0 ? idx : 0;
+}
+
 export default function AdminManualOrderDetailsPage() {
   const params = useParams<{ orderId?: string }>();
   const orderId = String(params?.orderId ?? "");
@@ -89,13 +97,55 @@ export default function AdminManualOrderDetailsPage() {
       {!loading && item ? (
         <>
           <div className="rounded-2xl border bg-white p-4">
-            <p className="font-semibold">{item.order_name}</p>
-            <p className="mt-2 text-sm">Vendor: {item.vendor_name}</p>
-            <p className="mt-1 text-sm">Customer: {item.customer_name}</p>
-            <p className="mt-1 text-sm">Phone: {item.customer_phone || "-"}</p>
-            <p className="mt-1 text-sm">Address: {item.delivery_address || "-"}</p>
-            <p className="mt-1 text-sm">Status: {friendlyStatus(item.status)}</p>
-            <p className="mt-1 text-sm">Total: {naira(item.total)}</p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-xs uppercase tracking-wide text-gray-500">Order</p>
+                <p className="mt-1 break-words text-lg font-semibold">{item.order_name}</p>
+                <p className="mt-2 text-sm text-gray-600">Order ID: {item.id}</p>
+              </div>
+              <div className="shrink-0 sm:text-right">
+                <p className="text-xs uppercase tracking-wide text-gray-500">Total</p>
+                <p className="mt-1 text-xl font-semibold">{naira(item.total)}</p>
+                <p className="mt-2 text-sm capitalize text-gray-600">{friendlyStatus(item.status)}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-white p-4">
+            <p className="font-semibold">Live status</p>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {STATUS_STEPS.map((step, index) => {
+                const active = index <= statusStepIndex(item.status);
+                return (
+                  <div
+                    key={step}
+                    className={`rounded-xl border px-3 py-3 text-center text-sm capitalize ${
+                      active ? "border-black bg-black text-white" : "bg-white text-gray-500"
+                    }`}
+                  >
+                    {step.replace(/_/g, " ")}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-2xl border bg-white p-4">
+              <p className="font-semibold">Vendor</p>
+              <p className="mt-3 text-sm">{item.vendor_name || "-"}</p>
+            </div>
+
+            <div className="rounded-2xl border bg-white p-4">
+              <p className="font-semibold">Customer</p>
+              <p className="mt-3 text-sm">Name: {item.customer_name || "-"}</p>
+              <p className="mt-1 text-sm">Phone: {item.customer_phone || "-"}</p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-white p-4">
+            <p className="font-semibold">Delivery</p>
+            <p className="mt-3 whitespace-pre-wrap text-sm">{item.delivery_address || "-"}</p>
           </div>
 
           <div className="rounded-2xl border bg-white p-4">
