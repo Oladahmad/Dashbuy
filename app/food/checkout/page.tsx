@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { fallbackFoodOrderName } from "@/lib/orderName";
 import { withErrandQuoteMeta } from "@/lib/errandQuote";
-import { FOOD_CUSTOMER_LOCATION_OPTIONS } from "@/lib/foodDeliveryMatrix";
+import { FOOD_CUSTOMER_LOCATION_OPTIONS, getFoodLocationGroupsForOrigin } from "@/lib/foodDeliveryMatrix";
 
 type PlateLine = {
   foodItemId?: string;
@@ -134,6 +134,7 @@ export default function FoodCheckoutPage() {
   const [walletPin, setWalletPin] = useState("");
   const [deliveryQuote, setDeliveryQuote] = useState<DeliveryQuote | null>(null);
   const [deliveryQuoteLoading, setDeliveryQuoteLoading] = useState(false);
+  const [vendorOrigins, setVendorOrigins] = useState<Record<string, string | null>>({});
 
   const platesSubtotal = useMemo(() => plates.reduce((sum, p) => sum + Number(p.plateTotal), 0), [plates]);
   const combosSubtotal = useMemo(() => combos.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0), [combos]);
@@ -166,6 +167,16 @@ export default function FoodCheckoutPage() {
   const quotedVendorDeliveryTotal = deliveryQuote?.total ?? 0;
   const totalDeliveryFee = quotedVendorDeliveryTotal + customVendorCount * DEFAULT_CUSTOM_REQUEST_DELIVERY_FEE;
   const total = subtotal + totalDeliveryFee;
+  const nonCustomVendorIds = useMemo(
+    () => cartVendorIds.filter((vendorId) => vendorId !== CUSTOM_REQUEST_VENDOR_ID),
+    [cartVendorIds]
+  );
+  const singleVendorOrigin =
+    nonCustomVendorIds.length === 1 ? (vendorOrigins[nonCustomVendorIds[0]] ?? null) : null;
+  const groupedLocationOptions = useMemo(
+    () => (singleVendorOrigin ? getFoodLocationGroupsForOrigin(singleVendorOrigin) : []),
+    [singleVendorOrigin]
+  );
 
   useEffect(() => {
     (async () => {
@@ -249,6 +260,40 @@ export default function FoodCheckoutPage() {
       cancelled = true;
     };
   }, [cartVendorIds, customerLocation]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadVendorOrigins() {
+      if (nonCustomVendorIds.length === 0) {
+        setVendorOrigins({});
+        return;
+      }
+
+      const entries = await Promise.all(
+        nonCustomVendorIds.map(async (vendorId) => {
+          try {
+            const resp = await fetch(`/api/catalog/food/vendor/${vendorId}`, { cache: "no-store" });
+            const body = (await resp.json().catch(() => null)) as
+              | { ok?: boolean; vendor?: { food_delivery_origin?: string | null } }
+              | null;
+            return [vendorId, body?.ok ? body.vendor?.food_delivery_origin ?? null : null] as const;
+          } catch {
+            return [vendorId, null] as const;
+          }
+        })
+      );
+
+      if (cancelled) return;
+      setVendorOrigins(Object.fromEntries(entries));
+    }
+
+    loadVendorOrigins();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [nonCustomVendorIds]);
 
   async function captureGeoPoint() {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
@@ -672,14 +717,29 @@ export default function FoodCheckoutPage() {
                 setMsg("");
               }}
             >
-              <option value="">Select your area</option>
-              {FOOD_CUSTOMER_LOCATION_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
+              <option value="">UNIQUE - Choose your exact location</option>
+              {groupedLocationOptions.length > 0
+                ? groupedLocationOptions.map((group) => (
+                    <optgroup key={group.price} label={`${formatNaira(group.price)} locations`}>
+                      {group.locations.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))
+                : FOOD_CUSTOMER_LOCATION_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
             </select>
-            <p className="mt-1 text-xs text-gray-500">Required. Delivery price will be calculated from the vendor base location to your area.</p>
+            <p className="mt-1 text-xs text-gray-500">
+              Required. Choose your exact location, not a broad area. Delivery price will be calculated from the restaurant base location.
+            </p>
+            {singleVendorOrigin ? (
+              <p className="mt-1 text-xs text-gray-500">Restaurant base location: {singleVendorOrigin}</p>
+            ) : null}
           </div>
           <div>
             <label className="text-sm font-medium">Delivery address</label>

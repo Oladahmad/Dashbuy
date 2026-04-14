@@ -18,7 +18,7 @@ export async function GET(_: Request, { params }: Params) {
 
   const { data: vendor, error: vendorError } = await supabaseAdmin
     .from("profiles")
-    .select("id,store_name,full_name,store_address,address,phone,logo_url,is_store_open,store_closed_note,store_hours_json")
+    .select("id,store_name,full_name,store_address,address,phone,logo_url,is_store_open,store_closed_note,store_hours_json,food_delivery_origin")
     .eq("id", vendorId)
     .maybeSingle();
 

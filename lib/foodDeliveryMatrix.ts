@@ -44,6 +44,10 @@ export const FOOD_CUSTOMER_LOCATION_OPTIONS = [
 
 export type FoodVendorOrigin = (typeof FOOD_VENDOR_ORIGIN_OPTIONS)[number];
 export type FoodCustomerLocation = (typeof FOOD_CUSTOMER_LOCATION_OPTIONS)[number];
+export type FoodLocationGroup = {
+  price: number;
+  locations: FoodCustomerLocation[];
+};
 
 type Matrix = Record<string, Record<string, number>>;
 
@@ -147,6 +151,12 @@ const DELIVERY_MATRIX: Matrix = {
   ]),
 };
 
+function minimumFeeForOrigin(origin: FoodVendorOrigin) {
+  const values = Object.values(DELIVERY_MATRIX[origin] ?? {}).filter((value) => Number.isFinite(value));
+  if (values.length === 0) return null;
+  return Math.min(...values);
+}
+
 export function normalizeFoodVendorOrigin(value: string | null | undefined) {
   const canonical = canonicalLocation(value);
   return FOOD_VENDOR_ORIGIN_OPTIONS.find((option) => canonicalLocation(option) === canonical) ?? null;
@@ -161,5 +171,31 @@ export function getFoodDeliveryFee(origin: string | null | undefined, destinatio
   const from = normalizeFoodVendorOrigin(origin);
   const to = normalizeFoodCustomerLocation(destination);
   if (!from || !to) return null;
-  return DELIVERY_MATRIX[from]?.[to] ?? null;
+  const direct = DELIVERY_MATRIX[from]?.[to];
+  if (typeof direct === "number") return direct;
+  if (canonicalLocation(from) === canonicalLocation(to)) {
+    return minimumFeeForOrigin(from);
+  }
+  return null;
+}
+
+export function getFoodLocationGroupsForOrigin(origin: string | null | undefined): FoodLocationGroup[] {
+  const from = normalizeFoodVendorOrigin(origin);
+  if (!from) return [];
+
+  const mapped = new Map<number, FoodCustomerLocation[]>();
+  for (const location of FOOD_CUSTOMER_LOCATION_OPTIONS) {
+    const fee = getFoodDeliveryFee(from, location);
+    if (fee == null) continue;
+    const current = mapped.get(fee) ?? [];
+    current.push(location);
+    mapped.set(fee, current);
+  }
+
+  return Array.from(mapped.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([price, locations]) => ({
+      price,
+      locations: locations.slice().sort((a, b) => a.localeCompare(b)),
+    }));
 }
