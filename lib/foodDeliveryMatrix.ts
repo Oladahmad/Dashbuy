@@ -40,13 +40,14 @@ export const FOOD_CUSTOMER_LOCATION_OPTIONS = [
   "Ololo-Mariam",
   "A1 Lounge",
   "St. Mary",
+  "Dashbuy",
 ] as const;
 
 export type FoodVendorOrigin = (typeof FOOD_VENDOR_ORIGIN_OPTIONS)[number];
 export type FoodCustomerLocation = (typeof FOOD_CUSTOMER_LOCATION_OPTIONS)[number];
-export type FoodLocationGroup = {
+export type FoodLocationOption = {
+  location: FoodCustomerLocation;
   price: number;
-  locations: FoodCustomerLocation[];
 };
 
 type Matrix = Record<string, Record<string, number>>;
@@ -73,6 +74,7 @@ const LOCATION_ALIASES: Record<string, string> = {
   [keyOf("Mini campus")]: "Mini Campus",
   [keyOf("Ago market")]: "Ago Market",
   [keyOf("A1 Lounge")]: "A1 Lounge",
+  [keyOf("Dashbuy")]: "Dashbuy",
 };
 
 function canonicalLocation(input: string | null | undefined) {
@@ -171,6 +173,7 @@ export function getFoodDeliveryFee(origin: string | null | undefined, destinatio
   const from = normalizeFoodVendorOrigin(origin);
   const to = normalizeFoodCustomerLocation(destination);
   if (!from || !to) return null;
+  if (to === "Dashbuy") return 0;
   const direct = DELIVERY_MATRIX[from]?.[to];
   if (typeof direct === "number") return direct;
   if (canonicalLocation(from) === canonicalLocation(to)) {
@@ -179,23 +182,20 @@ export function getFoodDeliveryFee(origin: string | null | undefined, destinatio
   return null;
 }
 
-export function getFoodLocationGroupsForOrigin(origin: string | null | undefined): FoodLocationGroup[] {
+export function getFoodLocationOptionsForOrigin(origin: string | null | undefined): FoodLocationOption[] {
   const from = normalizeFoodVendorOrigin(origin);
   if (!from) return [];
 
-  const mapped = new Map<number, FoodCustomerLocation[]>();
+  const options: FoodLocationOption[] = [];
   for (const location of FOOD_CUSTOMER_LOCATION_OPTIONS) {
     const fee = getFoodDeliveryFee(from, location);
     if (fee == null) continue;
-    const current = mapped.get(fee) ?? [];
-    current.push(location);
-    mapped.set(fee, current);
+    options.push({ location, price: fee });
   }
-
-  return Array.from(mapped.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([price, locations]) => ({
-      price,
-      locations: locations.slice().sort((a, b) => a.localeCompare(b)),
-    }));
+  return options.sort((a, b) => {
+    if (a.location === "Dashbuy") return 1;
+    if (b.location === "Dashbuy") return -1;
+    if (a.price !== b.price) return a.price - b.price;
+    return a.location.localeCompare(b.location);
+  });
 }

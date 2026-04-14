@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { fallbackFoodOrderName } from "@/lib/orderName";
 import { withErrandQuoteMeta } from "@/lib/errandQuote";
-import { FOOD_CUSTOMER_LOCATION_OPTIONS, getFoodLocationGroupsForOrigin } from "@/lib/foodDeliveryMatrix";
+import { FOOD_CUSTOMER_LOCATION_OPTIONS, getFoodLocationOptionsForOrigin } from "@/lib/foodDeliveryMatrix";
 
 type PlateLine = {
   foodItemId?: string;
@@ -173,8 +173,8 @@ export default function FoodCheckoutPage() {
   );
   const singleVendorOrigin =
     nonCustomVendorIds.length === 1 ? (vendorOrigins[nonCustomVendorIds[0]] ?? null) : null;
-  const groupedLocationOptions = useMemo(
-    () => (singleVendorOrigin ? getFoodLocationGroupsForOrigin(singleVendorOrigin) : []),
+  const pricedLocationOptions = useMemo(
+    () => (singleVendorOrigin ? getFoodLocationOptionsForOrigin(singleVendorOrigin) : []),
     [singleVendorOrigin]
   );
 
@@ -718,15 +718,12 @@ export default function FoodCheckoutPage() {
               }}
             >
               <option value="">UNIQUE - Choose your exact location</option>
-              {groupedLocationOptions.length > 0
-                ? groupedLocationOptions.map((group) => (
-                    <optgroup key={group.price} label={`${formatNaira(group.price)} locations`}>
-                      {group.locations.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </optgroup>
+              {pricedLocationOptions.length > 0
+                ? pricedLocationOptions.map((option) => (
+                    <option key={option.location} value={option.location}>
+                      {option.location}
+                      {option.location === "Dashbuy" ? "" : ` - ${formatNaira(option.price)}`}
+                    </option>
                   ))
                 : FOOD_CUSTOMER_LOCATION_OPTIONS.map((option) => (
                     <option key={option} value={option}>
