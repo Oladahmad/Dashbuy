@@ -49,6 +49,7 @@ type PayoutPreview = {
   created_at: string;
 };
 
+
 function naira(n: number) {
   return `N${Math.round(Number(n) || 0).toLocaleString()}`;
 }
@@ -351,6 +352,9 @@ export default function AdminPage() {
           </Link>
           <Link href="/admin/manual-orders" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
             View vendor manual orders
+          </Link>
+          <Link href="/admin/food-delivery-zones" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
+            Manage food delivery zones
           </Link>
         </div>
       </div>

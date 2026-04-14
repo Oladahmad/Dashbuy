@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { fallbackFoodOrderName } from "@/lib/orderName";
 import { withErrandQuoteMeta } from "@/lib/errandQuote";
+import { FOOD_CUSTOMER_LOCATION_OPTIONS } from "@/lib/foodDeliveryMatrix";
 
 type PlateLine = {
   foodItemId?: string;
@@ -75,8 +76,14 @@ function getPosition(options: PositionOptions) {
 }
 
 const FOOD_CART_KEY = "dashbuy_food_cart_v1";
-const DELIVERY_FEE = 900;
+const DEFAULT_CUSTOM_REQUEST_DELIVERY_FEE = 900;
 const CUSTOM_REQUEST_VENDOR_ID = "custom_request";
+
+type DeliveryQuote = {
+  total: number;
+  customerLocation: string;
+  byVendor: Record<string, { vendorName: string; origin: string | null; fee: number | null; error?: string }>;
+};
 
 function formatNaira(n: number) {
   return `N${Math.round(n).toLocaleString()}`;
@@ -120,10 +127,13 @@ export default function FoodCheckoutPage() {
   const [locating, setLocating] = useState(false);
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
+  const [customerLocation, setCustomerLocation] = useState("");
   const [payMethod, setPayMethod] = useState<"wallet" | "card">("card");
   const [walletBalance, setWalletBalance] = useState(0);
   const [walletPinEnabled, setWalletPinEnabled] = useState(false);
   const [walletPin, setWalletPin] = useState("");
+  const [deliveryQuote, setDeliveryQuote] = useState<DeliveryQuote | null>(null);
+  const [deliveryQuoteLoading, setDeliveryQuoteLoading] = useState(false);
 
   const platesSubtotal = useMemo(() => plates.reduce((sum, p) => sum + Number(p.plateTotal), 0), [plates]);
   const combosSubtotal = useMemo(() => combos.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0), [combos]);
@@ -138,7 +148,23 @@ export default function FoodCheckoutPage() {
     }
     return ids.size;
   }, [plates, combos]);
-  const totalDeliveryFee = vendorCount > 0 ? DELIVERY_FEE * vendorCount : 0;
+  const cartVendorIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...plates.map((p) => p.vendorId), ...combos.map((c) => c.vendorId)].filter(
+            (value): value is string => typeof value === "string" && value.length > 0
+          )
+        )
+      ),
+    [plates, combos]
+  );
+  const customVendorCount = useMemo(
+    () => cartVendorIds.filter((vendorId) => vendorId === CUSTOM_REQUEST_VENDOR_ID).length,
+    [cartVendorIds]
+  );
+  const quotedVendorDeliveryTotal = deliveryQuote?.total ?? 0;
+  const totalDeliveryFee = quotedVendorDeliveryTotal + customVendorCount * DEFAULT_CUSTOM_REQUEST_DELIVERY_FEE;
   const total = subtotal + totalDeliveryFee;
 
   useEffect(() => {
@@ -177,6 +203,52 @@ export default function FoodCheckoutPage() {
       setLoading(false);
     })();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDeliveryQuote() {
+      const vendorIds = cartVendorIds.filter((vendorId) => vendorId !== CUSTOM_REQUEST_VENDOR_ID);
+      if (!customerLocation || vendorIds.length === 0) {
+        setDeliveryQuote(null);
+        setDeliveryQuoteLoading(false);
+        return;
+      }
+
+      setDeliveryQuoteLoading(true);
+      const resp = await fetch("/api/food/delivery-quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vendorIds, customerLocation }),
+      });
+      const body = (await resp.json().catch(() => null)) as
+        | { ok?: boolean; error?: string; total?: number; customerLocation?: string; byVendor?: DeliveryQuote["byVendor"] }
+        | null;
+
+      if (cancelled) return;
+
+      if (!resp.ok || !body?.ok || !body.byVendor || typeof body.total !== "number") {
+        setDeliveryQuote(null);
+        if (customerLocation) {
+          setMsg(body?.error ?? "Could not calculate delivery fee for the selected location.");
+        }
+        setDeliveryQuoteLoading(false);
+        return;
+      }
+
+      setDeliveryQuote({
+        total: body.total,
+        customerLocation: body.customerLocation ?? customerLocation,
+        byVendor: body.byVendor,
+      });
+      setDeliveryQuoteLoading(false);
+    }
+
+    loadDeliveryQuote();
+    return () => {
+      cancelled = true;
+    };
+  }, [cartVendorIds, customerLocation]);
 
   async function captureGeoPoint() {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
@@ -234,6 +306,7 @@ export default function FoodCheckoutPage() {
     if (addr.length < 10) {
       return setMsg("Please include house number, street, area and landmark for fast delivery.");
     }
+    if (!customerLocation) return setMsg("Choose your delivery location before continuing.");
 
     const phoneClean = phone.trim();
     if (!phoneClean) return setMsg("Enter your phone number.");
@@ -306,7 +379,19 @@ export default function FoodCheckoutPage() {
       const vendorSubtotal =
         group.plates.reduce((sum, p) => sum + Number(p.plateTotal), 0) +
         group.combos.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0);
-      const vendorTotal = vendorSubtotal + DELIVERY_FEE;
+      const vendorDeliveryFee =
+        vendorId === CUSTOM_REQUEST_VENDOR_ID
+          ? DEFAULT_CUSTOM_REQUEST_DELIVERY_FEE
+          : deliveryQuote?.byVendor?.[vendorId]?.fee ?? null;
+      if (vendorId !== CUSTOM_REQUEST_VENDOR_ID && (vendorDeliveryFee == null || vendorDeliveryFee < 0)) {
+        setLoading(false);
+        setMsg(
+          deliveryQuote?.byVendor?.[vendorId]?.error ??
+            "Delivery fee is not set for this restaurant and location yet."
+        );
+        return;
+      }
+      const vendorTotal = vendorSubtotal + Number(vendorDeliveryFee ?? 0);
       const foodMode: "plate" | "combo" = group.plates.length > 0 ? "plate" : "combo";
 
       const candidateNames = [
@@ -340,17 +425,17 @@ export default function FoodCheckoutPage() {
           vendor_id: orderVendorId,
           status: "pending_payment",
           subtotal: vendorSubtotal,
-          delivery_fee: DELIVERY_FEE,
+          delivery_fee: Number(vendorDeliveryFee ?? 0),
           total: vendorTotal,
           delivery_address: deliveryAddressPayload,
           delivery_address_source: "manual",
           customer_phone: phoneClean,
           notes: isCustomVendor
             ? withErrandQuoteMeta(
-                [`Order name: ${generatedOrderName}`, notesPayload].filter(Boolean).join(" | "),
+                [`Order name: ${generatedOrderName}`, `Customer area: ${customerLocation}`, notesPayload].filter(Boolean).join(" | "),
                 { isErrand: true, status: "pending" }
               )
-            : [`Order name: ${generatedOrderName}`, notesPayload].filter(Boolean).join(" | "),
+            : [`Order name: ${generatedOrderName}`, `Customer area: ${customerLocation}`, notesPayload].filter(Boolean).join(" | "),
         })
         .select("id")
         .single();
@@ -563,9 +648,7 @@ export default function FoodCheckoutPage() {
         </div>
         <div className="flex justify-between">
           <span>Delivery fee</span>
-          <span className="font-semibold">
-            {formatNaira(totalDeliveryFee)} ({vendorCount} vendor{vendorCount === 1 ? "" : "s"})
-          </span>
+          <span className="font-semibold">{customerLocation ? formatNaira(totalDeliveryFee) : "Select location"}</span>
         </div>
         <div className="mt-2 flex justify-between text-lg">
           <span>Total</span>
@@ -579,6 +662,25 @@ export default function FoodCheckoutPage() {
           Enter the full delivery address. If you are already at the delivery point, capture your current location to help logistics find you faster.
         </p>
         <div className="mt-4 grid gap-3">
+          <div>
+            <label className="text-sm font-medium">Delivery location</label>
+            <select
+              className="mt-1 w-full rounded border p-2"
+              value={customerLocation}
+              onChange={(e) => {
+                setCustomerLocation(e.target.value);
+                setMsg("");
+              }}
+            >
+              <option value="">Select your area</option>
+              {FOOD_CUSTOMER_LOCATION_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">Required. Delivery price will be calculated from the vendor base location to your area.</p>
+          </div>
           <div>
             <label className="text-sm font-medium">Delivery address</label>
             <div className="mt-1 overflow-hidden rounded-xl border">
@@ -629,6 +731,35 @@ export default function FoodCheckoutPage() {
             />
           </div>
         </div>
+        {customerLocation ? (
+          <div className="mt-3 rounded-xl border bg-gray-50 p-3 text-sm">
+            {deliveryQuoteLoading ? (
+              <p className="text-gray-600">Calculating delivery fee...</p>
+            ) : deliveryQuote ? (
+              <div className="space-y-1">
+                {Object.values(deliveryQuote.byVendor).map((row, index) => (
+                  <div key={row.vendorName + index} className="flex items-center justify-between gap-3">
+                    <span className="truncate">
+                      {row.vendorName}
+                      {row.origin ? ` (${row.origin})` : ""}
+                    </span>
+                    <span className="font-medium">
+                      {row.fee != null ? formatNaira(row.fee) : row.error ?? "Not set"}
+                    </span>
+                  </div>
+                ))}
+                {customVendorCount > 0 ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Custom request delivery</span>
+                    <span className="font-medium">{formatNaira(customVendorCount * DEFAULT_CUSTOM_REQUEST_DELIVERY_FEE)}</span>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-red-600">Delivery price is not available for this route yet.</p>
+            )}
+          </div>
+        ) : null}
       </section>
 
       <section className="mt-4 rounded-2xl border bg-white p-4">
@@ -684,7 +815,7 @@ export default function FoodCheckoutPage() {
       </section>
 
       {msg ? <p className="mt-4 text-sm text-red-600">{msg}</p> : null}
-      <button className="mt-6 w-full rounded bg-black px-4 py-3 text-white disabled:opacity-60" onClick={placeOrder} disabled={isEmpty || loading || (payMethod === "wallet" && (walletBalance < total || !walletPinEnabled || walletPin.length !== 4))}>
+      <button className="mt-6 w-full rounded bg-black px-4 py-3 text-white disabled:opacity-60" onClick={placeOrder} disabled={isEmpty || loading || !customerLocation || (cartVendorIds.some((vendorId) => vendorId !== CUSTOM_REQUEST_VENDOR_ID && deliveryQuote?.byVendor?.[vendorId]?.fee == null)) || (payMethod === "wallet" && (walletBalance < total || !walletPinEnabled || walletPin.length !== 4))}>
         {payMethod === "wallet" ? "Continue with wallet" : "Continue to payment gateway"}
       </button>
     </main>
