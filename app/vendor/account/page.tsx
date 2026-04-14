@@ -31,6 +31,7 @@ type ProfileRow = {
   store_closed_note?: string | null;
   store_hours_json?: unknown;
 
+  bank_code?: string | null;
   bank_name: string | null;
   bank_account_number: string | null;
   bank_account_name: string | null;
@@ -186,7 +187,7 @@ export default function VendorAccountPage() {
         const { data, error } = await supabase
           .from("profiles")
           .select(
-          "id,role,full_name,phone,address,store_name,logo_url,is_store_open,store_closed_note,store_hours_json,bank_name,bank_account_number,bank_account_name"
+          "id,role,full_name,phone,address,store_name,logo_url,is_store_open,store_closed_note,store_hours_json,bank_code,bank_name,bank_account_number,bank_account_name"
         )
         .eq("id", user.id)
         .maybeSingle<ProfileRow>();
@@ -428,6 +429,7 @@ export default function VendorAccountPage() {
     const { error } = await supabase
       .from("profiles")
       .update({
+        bank_code: profile.bank_code ?? null,
         bank_name: bn,
         bank_account_number: bac,
         bank_account_name: ban,
@@ -442,6 +444,7 @@ export default function VendorAccountPage() {
 
     setProfile({
       ...profile,
+      bank_code: profile.bank_code ?? null,
       bank_name: bn,
       bank_account_number: bac,
       bank_account_name: ban,

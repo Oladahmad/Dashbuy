@@ -7,6 +7,14 @@ type PayoutRow = {
   amount: number | null;
   created_at: string;
   reference: string | null;
+  order_id?: string | null;
+  status?: string | null;
+  type?: string | null;
+  bank_name?: string | null;
+  bank_code?: string | null;
+  account_number?: string | null;
+  squad_transfer_reference?: string | null;
+  squad_requery_status?: string | null;
 };
 
 type OrderEarnRow = {
@@ -143,7 +151,7 @@ export async function payoutSummaryForActor(actorId: string, role: Role): Promis
 
   const { data: payoutsRows, error: payoutsErr } = await a
     .from("vendor_payouts")
-    .select("id,amount,created_at,reference")
+    .select("id,amount,created_at,reference,order_id,status,type,bank_name,bank_code,account_number,squad_transfer_reference,squad_requery_status")
     .eq("vendor_id", actorId)
     .order("created_at", { ascending: false })
     .limit(20);
@@ -151,7 +159,14 @@ export async function payoutSummaryForActor(actorId: string, role: Role): Promis
   if (payoutsErr) throw new Error("Payout history error: " + payoutsErr.message);
 
   const payouts = (payoutsRows ?? []) as PayoutRow[];
-  const paid = payouts.reduce((sum, p) => sum + asNumber(p.amount), 0);
+  const paid = payouts
+    .filter((p) => {
+      const status = String(p.status ?? "").toLowerCase();
+      const type = String(p.type ?? "").toLowerCase();
+      if (type === "emergency_request") return true;
+      return status === "" || status === "initiated" || status === "successful" || status === "request_sent";
+    })
+    .reduce((sum, p) => sum + asNumber(p.amount), 0);
   const withdrawable = Math.max(0, earned - paid);
 
   return { role, earned, paid, withdrawable, payouts };

@@ -130,6 +130,12 @@ export async function POST(req: Request) {
       vendor_id: auth.actorId,
       amount,
       reference: refOut,
+      type: "manual_withdrawal",
+      status: "successful",
+      bank_name: bankName,
+      bank_code: bankCode,
+      account_number: accountNumber,
+      squad_transfer_reference: refOut,
     });
 
     if (savePayoutErr) {

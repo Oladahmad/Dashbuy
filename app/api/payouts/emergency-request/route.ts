@@ -139,6 +139,11 @@ export async function POST(req: Request) {
       vendor_id: actorId,
       amount,
       reference: requestRef,
+      type: "emergency_request",
+      status: "request_sent",
+      bank_name: profile.bank_name,
+      account_number: profile.bank_account_number,
+      account_name: profile.bank_account_name,
     });
     if (logErr) {
       return NextResponse.json({ ok: false, error: "Request logged mail but history log failed: " + logErr.message }, { status: 500 });

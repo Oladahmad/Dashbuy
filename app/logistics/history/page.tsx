@@ -1,9 +1,8 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
-import { parseManualLogisticsNotes } from "@/lib/manualLogistics";
 
 type JobStatus = "pending_pickup" | "picked_up" | "delivered" | "cancelled";
 
@@ -15,20 +14,19 @@ type LogisticsJobRow = {
   status: JobStatus;
   created_at: string;
   updated_at: string;
-
   vendor_name: string | null;
   vendor_phone: string | null;
   vendor_address: string | null;
-
   customer_name: string | null;
   customer_phone: string | null;
   delivery_address: string | null;
-
   order_type: string | null;
   food_mode: string | null;
   order_total: number | null;
   customer_note?: string | null;
 };
+
+const HIDDEN_HISTORY_KEY = "dashbuy_hidden_logistics_history_ids";
 
 function cleanText(s: string | null | undefined) {
   return String(s ?? "").trim();
@@ -67,9 +65,25 @@ export default function HistoryPage() {
 
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
-
   const [jobs, setJobs] = useState<LogisticsJobRow[]>([]);
   const [filter, setFilter] = useState<"all" | "delivered" | "cancelled">("all");
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(HIDDEN_HISTORY_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setHiddenIds(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0) : []);
+    } catch {
+      setHiddenIds([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(HIDDEN_HISTORY_KEY, JSON.stringify(hiddenIds));
+  }, [hiddenIds]);
 
   useEffect(() => {
     let alive = true;
@@ -78,10 +92,9 @@ export default function HistoryPage() {
       setLoading(true);
       setMsg(null);
 
-      const { data: u } = await supabase.auth.getUser();
-      const user = u.user;
-
-      if (!user) {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (sessionErr || !token) {
         if (alive) {
           setMsg("Not signed in");
           setLoading(false);
@@ -89,80 +102,21 @@ export default function HistoryPage() {
         return;
       }
 
-      const { data: prof, error: pErr } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (pErr) {
-        if (alive) {
-          setMsg("Profile error: " + pErr.message);
-          setLoading(false);
-        }
-        return;
-      }
-
-      const role = String(prof?.role ?? "");
-      if (role !== "logistics" && role !== "admin") {
-        if (alive) {
-          setMsg("You are not authorized for logistics");
-          setLoading(false);
-        }
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("logistics_jobs")
-        .select(
-          "id,order_id,vendor_id,customer_id,status,created_at,updated_at,vendor_name,vendor_phone,vendor_address,customer_name,customer_phone,delivery_address,order_type,food_mode,order_total"
-        )
-        .in("status", ["delivered", "cancelled"])
-        .order("updated_at", { ascending: false });
+      const resp = await fetch("/api/logistics/jobs?status=history", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = (await resp.json().catch(() => null)) as { ok?: boolean; error?: string; jobs?: LogisticsJobRow[] } | null;
 
       if (!alive) return;
 
-      if (error) {
-        setMsg(error.message);
+      if (!resp.ok || !body?.ok || !Array.isArray(body.jobs)) {
+        setMsg(body?.error ?? "Failed to load logistics history");
         setJobs([]);
         setLoading(false);
         return;
       }
 
-      const rows = (data ?? []) as LogisticsJobRow[];
-
-      const orderIds = Array.from(
-        new Set(rows.map((r) => cleanText(r.order_id)).filter((x) => x.length > 0))
-      );
-
-      const orderNoteMap = new Map<string, string>();
-      if (orderIds.length > 0) {
-        const { data: orderRows, error: orderErr } = await supabase
-          .from("orders")
-          .select("id,notes")
-          .in("id", orderIds);
-
-        if (!orderErr && orderRows) {
-          for (const o of orderRows as Array<{ id: string; notes: string | null }>) {
-            orderNoteMap.set(o.id, cleanText(o.notes));
-          }
-        }
-      }
-
-      setJobs(
-        rows.map((r) => ({
-          ...r,
-          customer_name: (() => {
-            const m = parseManualLogisticsNotes(orderNoteMap.get(r.order_id) || "");
-            return m.isManual && m.source !== "vendor" ? m.customerName || r.customer_name : r.customer_name;
-          })(),
-          customer_note: (() => {
-            const note = orderNoteMap.get(r.order_id) || "";
-            const m = parseManualLogisticsNotes(note);
-            return m.isManual && m.source !== "vendor" ? m.itemsText || null : note || null;
-          })(),
-        }))
-      );
+      setJobs(body.jobs);
       setLoading(false);
     }
 
@@ -173,16 +127,22 @@ export default function HistoryPage() {
     };
   }, []);
 
+  const visibleJobs = useMemo(() => jobs.filter((j) => !hiddenIds.includes(j.id)), [jobs, hiddenIds]);
+
   const filtered = useMemo(() => {
-    if (filter === "all") return jobs;
-    return jobs.filter((j) => j.status === filter);
-  }, [jobs, filter]);
+    if (filter === "all") return visibleJobs;
+    return visibleJobs.filter((j) => j.status === filter);
+  }, [visibleJobs, filter]);
 
   const counts = useMemo(() => {
-    const delivered = jobs.filter((j) => j.status === "delivered").length;
-    const cancelled = jobs.filter((j) => j.status === "cancelled").length;
-    return { all: jobs.length, delivered, cancelled };
-  }, [jobs]);
+    const delivered = visibleJobs.filter((j) => j.status === "delivered").length;
+    const cancelled = visibleJobs.filter((j) => j.status === "cancelled").length;
+    return { all: visibleJobs.length, delivered, cancelled };
+  }, [visibleJobs]);
+
+  function hideItem(jobId: string) {
+    setHiddenIds((prev) => (prev.includes(jobId) ? prev : [...prev, jobId]));
+  }
 
   return (
     <main className="p-4 max-w-4xl mx-auto space-y-4">
@@ -245,14 +205,13 @@ export default function HistoryPage() {
               const gross = safeNumber(j.order_total, 0);
 
               return (
-                <button
-                  key={j.id}
-                  type="button"
-                  className="w-full text-left rounded-2xl border p-3 hover:bg-gray-50 cursor-pointer"
-                  onClick={() => router.push(`/logistics/history/${j.id}`)}
-                >
+                <div key={j.id} className="rounded-2xl border p-3">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-left rounded-xl hover:bg-gray-50"
+                      onClick={() => router.push(`/logistics/history/${j.id}`)}
+                    >
                       <p className="font-semibold truncate">{orderLabel(j)}</p>
                       <p className="text-xs text-gray-600 mt-1">
                         Updated {fmtDateTime(j.updated_at)} · {j.order_id.slice(0, 8)}
@@ -260,14 +219,21 @@ export default function HistoryPage() {
                       <p className="text-xs text-gray-600 mt-2 truncate">Vendor: {vendorName}</p>
                       <p className="text-xs text-gray-600 truncate">Delivery: {deliveryAddress}</p>
                       {customerNote ? <p className="text-xs text-gray-600 truncate">Note: {customerNote}</p> : null}
-                    </div>
+                    </button>
 
-                    <div className="text-right">
+                    <div className="shrink-0 text-right">
                       <p className="font-semibold">{naira(gross)}</p>
                       <p className="text-xs text-gray-600 mt-1">{j.status}</p>
+                      <button
+                        type="button"
+                        className="mt-3 rounded-xl border px-3 py-2 text-xs"
+                        onClick={() => hideItem(j.id)}
+                      >
+                        Hide
+                      </button>
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>

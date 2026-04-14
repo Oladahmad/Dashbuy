@@ -41,6 +41,15 @@ type ManualOrderItem = {
   created_at: string;
 };
 
+type PayoutPreview = {
+  id: string;
+  vendor_name: string;
+  amount: number;
+  status: string | null;
+  created_at: string;
+};
+
+
 function naira(n: number) {
   return `N${Math.round(Number(n) || 0).toLocaleString()}`;
 }
@@ -62,6 +71,7 @@ export default function AdminPage() {
   const [orderMismatches, setOrderMismatches] = useState<MismatchOrderRow[]>([]);
   const [walletMismatches, setWalletMismatches] = useState<MismatchWalletRow[]>([]);
   const [manualOrders, setManualOrders] = useState<ManualOrderItem[]>([]);
+  const [payouts, setPayouts] = useState<PayoutPreview[]>([]);
 
   async function loadMismatches(token: string) {
     const mismatchRes = await fetch("/api/admin/dva-mismatches", {
@@ -148,6 +158,15 @@ export default function AdminPage() {
         | null;
       if (manualRes.ok && manualBody?.ok) {
         setManualOrders(manualBody.items ?? []);
+      }
+      const payoutsRes = await fetch("/api/admin/payouts", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const payoutsBody = (await payoutsRes.json().catch(() => null)) as
+        | { ok?: boolean; items?: PayoutPreview[] }
+        | null;
+      if (payoutsRes.ok && payoutsBody?.ok) {
+        setPayouts(payoutsBody.items ?? []);
       }
       setLoading(false);
       if (!alive) return;
@@ -259,6 +278,38 @@ export default function AdminPage() {
       <div className="rounded-2xl border bg-white p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
+            <p className="font-semibold">Vendor payouts</p>
+            <p className="mt-1 text-sm text-gray-600">Recent automatic and manual payout records.</p>
+          </div>
+          <Link href="/admin/payouts" className="rounded-xl border px-4 py-2 text-sm hover:bg-gray-50">
+            View all
+          </Link>
+        </div>
+
+        {payouts.length === 0 ? (
+          <div className="mt-3 rounded-xl border p-3 text-sm text-gray-600">No payout records yet.</div>
+        ) : (
+          <div className="mt-3 grid gap-2">
+            {payouts.slice(0, 5).map((row) => (
+              <div key={row.id} className="rounded-xl border p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">{row.vendor_name}</p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      {new Date(row.created_at).toLocaleString()} · {String(row.status ?? "").replace(/_/g, " ") || "recorded"}
+                    </p>
+                  </div>
+                  <p className="font-semibold">{naira(row.amount)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border bg-white p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
             <p className="font-semibold">Vendor manual orders</p>
             <p className="mt-1 text-sm text-gray-600">All manual orders created by vendors across Dashbuy.</p>
           </div>
@@ -293,11 +344,17 @@ export default function AdminPage() {
           <Link href="/admin/custom-food-requests" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
             View custom food requests
           </Link>
+          <Link href="/admin/payouts" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
+            View vendor payouts
+          </Link>
           <Link href="/admin/notifications" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
             Send push notifications
           </Link>
           <Link href="/admin/manual-orders" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
             View vendor manual orders
+          </Link>
+          <Link href="/admin/food-delivery-zones" className="rounded-xl border px-4 py-3 text-center font-medium hover:bg-gray-50">
+            Manage food delivery zones
           </Link>
         </div>
       </div>
