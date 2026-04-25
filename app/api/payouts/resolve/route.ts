@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { squadLookupAccount } from "@/lib/squad";
+import { paystackResolveAccount } from "@/lib/paystack";
 
 type Body = {
   bankCode?: string;
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Missing bankCode or accountNumber" }, { status: 400 });
     }
 
-    const lookup = await squadLookupAccount(bankCode, accountNumber);
+    const lookup = await paystackResolveAccount(bankCode, accountNumber);
     if (!lookup.ok) {
       return NextResponse.json(
         { ok: false, error: lookup.json?.message ?? "Account resolve failed" },

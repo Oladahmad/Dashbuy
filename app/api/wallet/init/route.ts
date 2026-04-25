@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { squadInitiatePayment } from "@/lib/squad";
+import { paystackInitializeTransaction } from "@/lib/paystack";
 
 type Body = {
   amount?: number | string;
@@ -55,9 +55,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Enter a valid amount" }, { status: 400 });
     }
 
-    const secret = process.env.SQUAD_SECRET_KEY;
+    const secret = process.env.PAYSTACK_SECRET_KEY;
     if (!secret) {
-      return NextResponse.json({ ok: false, error: "SQUAD_SECRET_KEY missing in env" }, { status: 500 });
+      return NextResponse.json({ ok: false, error: "PAYSTACK_SECRET_KEY missing in env" }, { status: 500 });
     }
 
     const envBase = asText(process.env.NEXT_PUBLIC_SITE_URL).trim();
@@ -76,19 +76,19 @@ export async function POST(req: Request) {
     const reference = `dashbuy_wallet_${customerId.slice(0, 8)}_${Date.now()}`;
     const callbackUrl = `${baseUrl}/account/add-funds/callback`;
 
-    const squad = await squadInitiatePayment({
+    const payment = await paystackInitializeTransaction({
       amountKobo: Math.round(Number(amount) * 100),
       email,
-      transactionRef: reference,
+      reference,
       callbackUrl,
       metadata: {
         type: "wallet_topup",
         customerId,
       },
-      paymentChannels: ["card", "bank", "transfer", "ussd"],
+      channels: ["card", "bank", "bank_transfer", "ussd"],
     });
-    const json = squad.json;
-    if (!squad.ok || !json?.data?.checkout_url) {
+    const json = payment.json;
+    if (!payment.ok || !json?.data?.authorization_url) {
       return NextResponse.json(
         { ok: false, error: json?.message ?? "Wallet payment init failed", raw: json },
         { status: 400 }
@@ -100,12 +100,12 @@ export async function POST(req: Request) {
       customer_id: customerId,
       amount,
       reference,
-      provider: "squad",
+      provider: "paystack",
       type: "topup",
       status: "initialized",
     });
 
-    return NextResponse.json({ ok: true, authorization_url: json.data.checkout_url, reference });
+    return NextResponse.json({ ok: true, authorization_url: json.data.authorization_url, reference });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Server error";
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });

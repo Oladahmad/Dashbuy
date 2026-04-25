@@ -18,8 +18,6 @@ type PayoutRow = {
   bank_code: string | null;
   account_number: string | null;
   account_name: string | null;
-  squad_transfer_reference: string | null;
-  squad_requery_status: string | null;
 };
 
 function naira(n: number) {
@@ -136,9 +134,7 @@ export default function AdminPayoutsPage() {
                     <p>Bank code: {row.bank_code ?? "-"}</p>
                     <p>Account: {row.account_number ?? "-"}</p>
                     <p>Account name: {row.account_name ?? "-"}</p>
-                    <p>Requery: {row.squad_requery_status ?? "-"}</p>
                     <p>Ref: {row.reference ?? "-"}</p>
-                    <p>Squad ref: {row.squad_transfer_reference ?? "-"}</p>
                   </div>
                 </div>
               ))}

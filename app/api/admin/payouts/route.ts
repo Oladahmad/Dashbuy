@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
 
     const { data, error } = await supabaseAdmin
       .from("vendor_payouts")
-      .select("id,vendor_id,order_id,amount,reference,created_at,status,type,bank_name,bank_code,account_number,account_name,squad_transfer_reference,squad_requery_status")
+      .select("id,vendor_id,order_id,amount,reference,created_at,status,type,bank_name,bank_code,account_number,account_name")
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -63,8 +63,6 @@ export async function GET(req: NextRequest) {
       bank_code: row.bank_code ? String(row.bank_code) : null,
       account_number: row.account_number ? String(row.account_number) : null,
       account_name: row.account_name ? String(row.account_name) : null,
-      squad_transfer_reference: row.squad_transfer_reference ? String(row.squad_transfer_reference) : null,
-      squad_requery_status: row.squad_requery_status ? String(row.squad_requery_status) : null,
     }));
 
     return NextResponse.json({ ok: true, items });

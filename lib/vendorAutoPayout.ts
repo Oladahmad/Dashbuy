@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { findSquadBankByName } from "@/lib/squadBanks";
-import { squadLookupAccount, squadRequeryTransfer, squadTransfer } from "@/lib/squad";
+import { paystackCreateTransferRecipient, paystackInitiateTransfer, paystackResolveAccount } from "@/lib/paystack";
 import { sendTransactionalEmail, simpleEmailLayout } from "@/lib/mailer";
 
 type OrderRow = {
@@ -61,10 +60,8 @@ function vendorNetAmount(order: OrderRow) {
 }
 
 function payoutReference(orderId: string) {
-  const merchantId = String(process.env.SQUAD_MERCHANT_ID ?? "").trim();
-  if (!merchantId) throw new Error("SQUAD_MERCHANT_ID missing in env");
   const compact = orderId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 18);
-  return `${merchantId}_pickup_${compact}`;
+  return `dashbuy_pickup_${compact}_${Date.now()}`;
 }
 
 export async function triggerVendorPickupPayout(orderId: string) {
@@ -119,24 +116,22 @@ export async function triggerVendorPickupPayout(orderId: string) {
     return { ok: false as const, error: "Vendor bank details are incomplete", amount, reference, vendorName: String(vendor.store_name ?? vendor.full_name ?? "Vendor") };
   }
 
-  const matchedBank = String(vendor.bank_code ?? "").trim()
-    ? { code: String(vendor.bank_code).trim(), name: bankName }
-    : findSquadBankByName(bankName);
-  if (!matchedBank?.code) {
+  const bankCode = String(vendor.bank_code ?? "").trim();
+  if (!bankCode) {
     return {
       ok: false as const,
-      error: `Vendor bank is not mapped for Squad payout yet: ${bankName}`,
+      error: `Vendor bank code is missing for payout: ${bankName}`,
       amount,
       reference,
       vendorName: String(vendor.store_name ?? vendor.full_name ?? "Vendor"),
     };
   }
 
-  const lookup = await squadLookupAccount(matchedBank.code, accountNumber);
+  const lookup = await paystackResolveAccount(bankCode, accountNumber);
   if (!lookup.ok || !lookup.json?.data?.account_name) {
     return {
       ok: false as const,
-      error: lookup.json?.message ?? "Squad account lookup failed",
+      error: lookup.json?.message ?? "Paystack account lookup failed",
       amount,
       reference,
       vendorName: String(vendor.store_name ?? vendor.full_name ?? "Vendor"),
@@ -144,18 +139,31 @@ export async function triggerVendorPickupPayout(orderId: string) {
   }
 
   const resolvedAccountName = String(lookup.json.data.account_name).trim();
-  const transfer = await squadTransfer({
-    transactionReference: reference,
-    amountKobo: amount * 100,
-    bankCode: matchedBank.code,
-    accountNumber,
+  const recipient = await paystackCreateTransferRecipient({
     accountName: resolvedAccountName || accountName,
-    remark: `Dashbuy payout ${order.id.slice(0, 8)}`,
+    accountNumber,
+    bankCode,
+  });
+  if (!recipient.ok || !recipient.json?.data?.recipient_code) {
+    return {
+      ok: false as const,
+      error: recipient.json?.message ?? "Paystack recipient creation failed",
+      amount,
+      reference,
+      vendorName: String(vendor.store_name ?? vendor.full_name ?? "Vendor"),
+    };
+  }
+
+  const transfer = await paystackInitiateTransfer({
+    amountKobo: amount * 100,
+    recipientCode: String(recipient.json.data.recipient_code),
+    reference,
+    reason: `Dashbuy payout ${order.id.slice(0, 8)}`,
   });
 
   if (!transfer.ok) {
     const failedRef =
-      String(transfer.json?.data?.transaction_reference ?? reference).trim() || reference;
+      String(transfer.json?.data?.reference ?? transfer.json?.data?.transfer_code ?? reference).trim() || reference;
     const { error: insertFailedErr } = await a.from("vendor_payouts").insert({
       vendor_id: order.vendor_id,
       order_id: order.id,
@@ -164,17 +172,15 @@ export async function triggerVendorPickupPayout(orderId: string) {
       type: "pickup_auto_payout",
       status: "failed",
       bank_name: bankName,
-      bank_code: matchedBank.code,
+      bank_code: bankCode,
       account_number: accountNumber,
-      squad_transfer_reference: failedRef,
-      squad_requery_status: String(transfer.json?.message ?? "failed"),
     });
     if (insertFailedErr) {
       return { ok: false as const, error: "Vendor payout save failed: " + insertFailedErr.message, amount, reference, vendorName: String(vendor.store_name ?? vendor.full_name ?? "Vendor"), status: "failed" };
     }
     return {
       ok: false as const,
-      error: transfer.json?.message ?? "Squad transfer failed",
+      error: transfer.json?.message ?? "Paystack transfer failed",
       amount,
       reference: failedRef,
       vendorName: String(vendor.store_name ?? vendor.full_name ?? "Vendor"),
@@ -182,52 +188,15 @@ export async function triggerVendorPickupPayout(orderId: string) {
     };
   }
 
-  const requery = await squadRequeryTransfer(reference);
-  const requeryStatus = String(
-    requery.json?.data?.transaction_status ?? requery.json?.message ?? (requery.ok ? "successful" : requery.status === 404 ? "initiated" : "unknown")
-  ).trim();
-  if (!requery.ok && requery.status !== 404) {
-    const { error: insertErr } = await a.from("vendor_payouts").insert({
-      vendor_id: order.vendor_id,
-      order_id: order.id,
-      amount,
-      reference,
-      type: "pickup_auto_payout",
-      status: "initiated",
-      bank_name: bankName,
-      bank_code: matchedBank.code,
-      account_number: accountNumber,
-      squad_transfer_reference: String(transfer.json?.data?.transaction_reference ?? reference).trim() || reference,
-      squad_requery_status: requeryStatus,
-    });
-    if (insertErr) {
-      return { ok: false as const, error: "Vendor payout save failed: " + insertErr.message, amount, reference, vendorName: String(vendor.store_name ?? vendor.full_name ?? "Vendor"), status: "initiated" };
-    }
-    return {
-      ok: true as const,
-      amount,
-      reference,
-      status: "initiated",
-      vendorName: String(vendor.store_name ?? vendor.full_name ?? "Vendor"),
-      message: `Vendor payout of N${amount.toLocaleString()} initiated successfully`,
-    };
-  }
-
+  const transferStatus = String(transfer.json?.data?.status ?? "pending").trim().toLowerCase();
   const finalReference =
-    String(
-      requery.json?.data?.nip_transaction_reference ??
-        transfer.json?.data?.nip_transaction_reference ??
-        transfer.json?.data?.transaction_reference ??
-        reference
-    ).trim() || reference;
-
-  const normalizedStatus = /reverse/i.test(requeryStatus)
-    ? "reversed"
-    : /fail/i.test(requeryStatus)
-      ? "failed"
-      : requery.status === 404
-        ? "initiated"
-        : "successful";
+    String(transfer.json?.data?.reference ?? transfer.json?.data?.transfer_code ?? reference).trim() || reference;
+  const normalizedStatus =
+    transferStatus === "success"
+      ? "successful"
+      : transferStatus === "failed" || transferStatus === "reversed"
+        ? transferStatus
+        : "initiated";
 
   const { error: insertErr } = await a.from("vendor_payouts").insert({
     vendor_id: order.vendor_id,
@@ -237,10 +206,8 @@ export async function triggerVendorPickupPayout(orderId: string) {
     type: "pickup_auto_payout",
     status: normalizedStatus,
     bank_name: bankName,
-    bank_code: matchedBank.code,
+    bank_code: bankCode,
     account_number: accountNumber,
-    squad_transfer_reference: finalReference,
-    squad_requery_status: requeryStatus,
   });
 
   if (insertErr) {
@@ -260,7 +227,7 @@ export async function triggerVendorPickupPayout(orderId: string) {
     orderId: order.id,
     result,
     bankName,
-    bankCode: matchedBank.code,
+    bankCode,
     accountNumber,
   });
 

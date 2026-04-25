@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { creditWalletTransaction } from "@/lib/walletCredit";
-import { squadVerifyTransaction } from "@/lib/squad";
+import { paystackVerifyTransaction } from "@/lib/paystack";
 
 type Body = { reference?: string };
 
@@ -32,24 +32,24 @@ export async function POST(req: Request) {
     const reference = String(body?.reference ?? "").trim();
     if (!reference) return NextResponse.json({ ok: false, error: "Missing reference" }, { status: 400 });
 
-    const secret = process.env.SQUAD_SECRET_KEY;
+    const secret = process.env.PAYSTACK_SECRET_KEY;
     if (!secret) {
-      return NextResponse.json({ ok: false, error: "SQUAD_SECRET_KEY missing in env" }, { status: 500 });
+      return NextResponse.json({ ok: false, error: "PAYSTACK_SECRET_KEY missing in env" }, { status: 500 });
     }
 
-    const verification = await squadVerifyTransaction(reference);
+    const verification = await paystackVerifyTransaction(reference);
     const data = verification.json;
-    if (!verification.ok || !data?.success) {
+    if (!verification.ok || !data?.status) {
       return NextResponse.json({ ok: false, error: data?.message ?? "Verify failed" }, { status: 400 });
     }
 
-    const status = String(data?.data?.transaction_status ?? "").trim().toLowerCase();
+    const status = String(data?.data?.status ?? "").trim().toLowerCase();
     if (status !== "success" && status !== "successful") {
-      return NextResponse.json({ ok: true, status: data?.data?.transaction_status ?? status });
+      return NextResponse.json({ ok: true, status: data?.data?.status ?? status });
     }
 
-    const txRef = String(data?.data?.transaction_ref ?? reference);
-    const amountKobo = Number(data?.data?.transaction_amount ?? 0);
+    const txRef = String(data?.data?.reference ?? reference);
+    const amountKobo = Number(data?.data?.amount ?? 0);
     const amount = Math.floor(amountKobo / 100);
     const admin = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
     const { data: txRow, error: txErr } = await admin
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
       customerId,
       amount,
       reference: txRef,
-      provider: "squad",
+      provider: "paystack",
     });
 
     return NextResponse.json({ ok: result.ok, status: "success", credited: true, already: result.already ?? false });

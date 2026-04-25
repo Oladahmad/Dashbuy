@@ -135,7 +135,6 @@ export async function POST(req: Request) {
       bank_name: bankName,
       bank_code: bankCode,
       account_number: accountNumber,
-      squad_transfer_reference: refOut,
     });
 
     if (savePayoutErr) {

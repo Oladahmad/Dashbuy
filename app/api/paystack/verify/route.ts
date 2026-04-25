@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { notifyOrderEvent } from "@/lib/orderNotifications";
-import { squadVerifyTransaction } from "@/lib/squad";
+import { paystackVerifyTransaction } from "@/lib/paystack";
 
 type PaidOrder = {
   id: string;
@@ -28,30 +28,30 @@ export async function POST(req: Request) {
       );
     }
 
-    const secret = process.env.SQUAD_SECRET_KEY;
+    const secret = process.env.PAYSTACK_SECRET_KEY;
     if (!secret) {
       return NextResponse.json(
-        { ok: false, error: "SQUAD_SECRET_KEY missing in .env.local" },
+        { ok: false, error: "PAYSTACK_SECRET_KEY missing in .env.local" },
         { status: 500 }
       );
     }
 
-    const verification = await squadVerifyTransaction(reference);
+    const verification = await paystackVerifyTransaction(reference);
     const data = verification.json;
 
-    if (!verification.ok || !data?.success) {
+    if (!verification.ok || !data?.status) {
       return NextResponse.json(
         { ok: false, error: data?.message ?? "Verify failed" },
         { status: 400 }
       );
     }
 
-    const paymentStatus = String(data?.data?.transaction_status ?? "");
+    const paymentStatus = String(data?.data?.status ?? "");
     const normalizedPaymentStatus = paymentStatus.trim().toLowerCase();
-    const amountKobo = Number(data?.data?.transaction_amount ?? 0);
-    const currency = String(data?.data?.transaction_currency_id ?? "NGN");
-    const paidAt = data?.data?.created_at ?? null;
-    const ref = String(data?.data?.transaction_ref ?? reference);
+    const amountKobo = Number(data?.data?.amount ?? 0);
+    const currency = String(data?.data?.currency ?? "NGN");
+    const paidAt = data?.data?.paid_at ?? null;
+    const ref = String(data?.data?.reference ?? reference);
 
     if (normalizedPaymentStatus === "success" || normalizedPaymentStatus === "successful") {
       const updatePayload = {

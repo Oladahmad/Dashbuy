@@ -15,8 +15,6 @@ type Payout = {
   bank_name?: string | null;
   bank_code?: string | null;
   account_number?: string | null;
-  squad_transfer_reference?: string | null;
-  squad_requery_status?: string | null;
 };
 
 function naira(n: number) {
@@ -46,7 +44,6 @@ function statusLabel(row: Payout) {
   if (status === "failed") return "Failed";
   if (status === "reversed") return "Reversed";
   if (status === "initiated") return "Initiated";
-  if (row.squad_requery_status) return row.squad_requery_status;
   return "Recorded";
 }
 
@@ -126,9 +123,6 @@ export default function VendorWithdrawHistoryPage() {
                     {p.order_id ? <p className="mt-1 text-xs text-gray-600">Order: {p.order_id.slice(0, 8)}</p> : null}
                     {p.bank_name ? <p className="mt-1 text-xs text-gray-600">Bank: {p.bank_name}</p> : null}
                     {p.account_number ? <p className="mt-1 text-xs text-gray-600">Account: {p.account_number}</p> : null}
-                    {p.squad_transfer_reference ? (
-                      <p className="mt-1 text-xs text-gray-600">Squad ref: {p.squad_transfer_reference}</p>
-                    ) : null}
                     {p.reference ? <p className="mt-1 text-xs text-gray-600">Ref: {p.reference}</p> : null}
                   </div>
                 );

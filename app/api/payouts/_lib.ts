@@ -13,8 +13,6 @@ type PayoutRow = {
   bank_name?: string | null;
   bank_code?: string | null;
   account_number?: string | null;
-  squad_transfer_reference?: string | null;
-  squad_requery_status?: string | null;
 };
 
 type OrderEarnRow = {
@@ -151,7 +149,7 @@ export async function payoutSummaryForActor(actorId: string, role: Role): Promis
 
   const { data: payoutsRows, error: payoutsErr } = await a
     .from("vendor_payouts")
-    .select("id,amount,created_at,reference,order_id,status,type,bank_name,bank_code,account_number,squad_transfer_reference,squad_requery_status")
+    .select("id,amount,created_at,reference,order_id,status,type,bank_name,bank_code,account_number")
     .eq("vendor_id", actorId)
     .order("created_at", { ascending: false })
     .limit(20);
