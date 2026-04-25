@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import OrderTimeline from "@/components/OrderTimeline";
 import { resolveTrackingStatus } from "@/lib/orderTracking";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
+import { VENDOR_TRIAL_DELIVERED_ORDERS, buildVendorPricingMap } from "@/lib/pricing";
 
 type OrderRow = {
   id: string;
@@ -23,11 +24,6 @@ type OrderRow = {
   notes: string | null;
   paystack_reference: string | null;
   created_at: string;
-};
-
-type OrderPlateRow = {
-  id: string;
-  order_id: string;
 };
 
 type ProductItemRow = {
@@ -88,22 +84,6 @@ function formatDateTime(iso: string) {
   }
 }
 
-function computeGross(o: OrderRow) {
-  const subtotal = safeNumber(o.subtotal, 0);
-  if (subtotal > 0) return subtotal;
-  const total = safeNumber(o.total_amount ?? o.total, 0);
-  const delivery = safeNumber(o.delivery_fee, 0);
-  return Math.max(0, total - delivery);
-}
-
-function computeVendorFee(gross: number) {
-  return Math.round(gross * 0.05);
-}
-
-function computeVendorNet(gross: number) {
-  return Math.max(0, gross - computeVendorFee(gross));
-}
-
 function lineTotal(qty: number, unit: number) {
   return Math.max(0, Math.round(qty * unit));
 }
@@ -148,6 +128,7 @@ export default function VendorOrderDetailsPage() {
 
   const [err, setErr] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderRow | null>(null);
+  const [vendorOrders, setVendorOrders] = useState<OrderRow[]>([]);
 
   const [productItems, setProductItems] = useState<ProductItemRow[]>([]);
   const [comboItems, setComboItems] = useState<ComboItemRow[]>([]);
@@ -216,8 +197,42 @@ export default function VendorOrderDetailsPage() {
         .eq("order_id", o.id)
         .maybeSingle<{ status: string | null }>();
 
-      const effectiveStatus = resolveTrackingStatus(o.status, job?.status ?? null);
-      setOrder({ ...o, status: effectiveStatus });
+        const effectiveStatus = resolveTrackingStatus(o.status, job?.status ?? null);
+        setOrder({ ...o, status: effectiveStatus });
+
+        const vendorOrdersResp = await supabase
+          .from("orders")
+          .select(
+            "id,order_type,food_mode,customer_id,vendor_id,status,subtotal,delivery_fee,total,total_amount,delivery_address,customer_phone,notes,paystack_reference,created_at"
+          )
+          .eq("vendor_id", userId)
+          .order("created_at", { ascending: true });
+
+        if (vendorOrdersResp.error) {
+          setErr(vendorOrdersResp.error.message);
+          setLoading(false);
+          return;
+        }
+
+        const vendorOrderRows = (vendorOrdersResp.data ?? []) as OrderRow[];
+        const vendorOrderIds = vendorOrderRows.map((row) => row.id);
+        if (vendorOrderIds.length > 0) {
+          const { data: vendorJobs } = await supabase
+            .from("logistics_jobs")
+            .select("order_id,status")
+            .in("order_id", vendorOrderIds);
+
+          const deliveredVendorOrderIds = new Set(
+            ((vendorJobs ?? []) as Array<{ order_id: string; status: string | null }>)
+              .filter((entry) => (entry.status ?? "").toLowerCase() === "delivered")
+              .map((entry) => entry.order_id)
+          );
+
+          for (const vendorOrder of vendorOrderRows) {
+            if (deliveredVendorOrderIds.has(vendorOrder.id)) vendorOrder.status = "delivered";
+          }
+        }
+        setVendorOrders(vendorOrderRows);
 
       const itemsResp = await fetch("/api/orders/items", {
         method: "POST",
@@ -336,13 +351,19 @@ export default function VendorOrderDetailsPage() {
     };
   }, [id]);
 
-  const gross = useMemo(() => (order ? computeGross(order) : 0), [order]);
-  const fee = useMemo(() => computeVendorFee(gross), [gross]);
-  const net = useMemo(() => computeVendorNet(gross), [gross]);
+  const pricingMap = useMemo(() => buildVendorPricingMap(vendorOrders), [vendorOrders]);
+  const orderPricing = useMemo(() => (order ? pricingMap[order.id] : null), [order, pricingMap]);
+  const gross = orderPricing?.gross ?? 0;
+  const fee = orderPricing?.commission ?? 0;
+  const net = orderPricing?.net ?? 0;
   const displayOrderName = useMemo(() => {
     if (!order) return "";
     return extractOrderNameFromNotes(order.notes);
   }, [order]);
+  const trialOrdersRemaining = useMemo(() => {
+    if (!orderPricing) return VENDOR_TRIAL_DELIVERED_ORDERS;
+    return Math.max(0, VENDOR_TRIAL_DELIVERED_ORDERS - orderPricing.deliveredBeforeCount);
+  }, [orderPricing]);
 
   async function acceptOrder() {
     if (!order) return;
@@ -570,6 +591,13 @@ export default function VendorOrderDetailsPage() {
               <div className="rounded-xl border p-3">
                 <p className="text-xs text-gray-600">Platform fee</p>
                 <p className="text-base font-semibold">{formatNaira(fee)}</p>
+                {orderPricing?.commissionRate === 0 ? (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Trial order. {trialOrdersRemaining} free order{trialOrdersRemaining === 1 ? "" : "s"} left before 5%.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-gray-500">5% vendor commission applied.</p>
+                )}
               </div>
 
               <div className="rounded-xl border p-3">

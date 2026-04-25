@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
+import { buildVendorPricingMap } from "@/lib/pricing";
 
 type Role = "customer" | "vendor_food" | "vendor_products" | "admin";
 
@@ -313,10 +314,38 @@ export default function VendorDashboardPage() {
   }, []);
 
   const summary = useMemo(() => {
+    const pricingMap = buildVendorPricingMap(
+      orders
+        .map((row) => {
+          const id = pickString(row, ["id"]);
+          const createdAt = pickString(row, ["created_at"]);
+          if (!id || !createdAt) return null;
+          return {
+            id,
+            created_at: createdAt,
+            status: pickString(row, ["status"]) || "pending_payment",
+            subtotal: pickNumber(row, ["subtotal"]),
+            total: pickNumber(row, ["total"]),
+            total_amount: pickNumber(row, ["total_amount", "amount", "grand_total"]),
+            delivery_fee: pickNumber(row, ["delivery_fee"]),
+          };
+        })
+        .filter((row): row is {
+          id: string;
+          created_at: string;
+          status: string;
+          subtotal: number;
+          total: number;
+          total_amount: number;
+          delivery_fee: number;
+        } => !!row)
+    );
+
     const rows = orders.map((row) => {
+      const id = pickString(row, ["id"]);
       const status = pickString(row, ["status"]) || "pending_payment";
       const base = orderCommissionBase(row);
-      const net = Math.max(0, Math.round(base - base * 0.05));
+      const net = pricingMap[id]?.net ?? base;
       return { status, net };
     });
 
@@ -434,13 +463,41 @@ export default function VendorDashboardPage() {
           ) : recentOrders.length === 0 ? (
             <p className="text-sm text-gray-600">No orders yet</p>
           ) : (
-            recentOrders.map((row, idx) => {
-              const id = pickString(row, ["id", "order_id"]) || `order ${idx + 1}`;
-              const status = pickString(row, ["status"]) || "pending";
-              const amount = orderCommissionBase(row);
-              const fallbackName = extractOrderNameFromNotes(pickString(row, ["notes"])) || "Order items";
-              const meta = orderMeta[id];
-              const title = meta?.summary || fallbackName;
+            (() => {
+              const pricingMap = buildVendorPricingMap(
+                orders
+                  .map((entry) => {
+                    const id = pickString(entry, ["id"]);
+                    const createdAt = pickString(entry, ["created_at"]);
+                    if (!id || !createdAt) return null;
+                    return {
+                      id,
+                      created_at: createdAt,
+                      status: pickString(entry, ["status"]) || "pending_payment",
+                      subtotal: pickNumber(entry, ["subtotal"]),
+                      total: pickNumber(entry, ["total"]),
+                      total_amount: pickNumber(entry, ["total_amount", "amount", "grand_total"]),
+                      delivery_fee: pickNumber(entry, ["delivery_fee"]),
+                    };
+                  })
+                  .filter((row): row is {
+                    id: string;
+                    created_at: string;
+                    status: string;
+                    subtotal: number;
+                    total: number;
+                    total_amount: number;
+                    delivery_fee: number;
+                  } => !!row)
+              );
+
+              return recentOrders.map((row, idx) => {
+                const id = pickString(row, ["id", "order_id"]) || `order ${idx + 1}`;
+                const status = pickString(row, ["status"]) || "pending";
+                const amount = pricingMap[id]?.net ?? orderCommissionBase(row);
+                const fallbackName = extractOrderNameFromNotes(pickString(row, ["notes"])) || "Order items";
+                const meta = orderMeta[id];
+                const title = meta?.summary || fallbackName;
               const buyer = meta?.buyerName || "Customer";
               return (
                 <Link key={idx} href={`/vendor/orders/${id}`} className="block rounded-xl border p-3 hover:bg-gray-50">
@@ -450,9 +507,10 @@ export default function VendorDashboardPage() {
                   </div>
                   <p className="mt-1 text-xs text-gray-500">Buyer: {buyer}</p>
                   <p className="mt-1 text-xs text-gray-500">Status: {status}</p>
-                </Link>
-              );
-            })
+                  </Link>
+                );
+              });
+            })()
           )}
         </div>
 

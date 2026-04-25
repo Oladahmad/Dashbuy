@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import { calculateCustomerOrderTotal, calculateServiceFee } from "@/lib/pricing";
 
 const CART_KEY = "dashbuy_products_cart_v1";
 const DELIVERY_FEE = 900;
@@ -101,7 +102,14 @@ export default function ProductCheckoutPage() {
     [items]
   );
   const deliveryFee = items.length ? DELIVERY_FEE * Math.max(1, vendorCount) : 0;
-  const total = subtotal + deliveryFee;
+  const serviceFeeTotal = useMemo(() => {
+    const groupedSubtotals = new Map<string, number>();
+    for (const item of items) {
+      groupedSubtotals.set(item.vendorId, (groupedSubtotals.get(item.vendorId) ?? 0) + Number(item.price) * Number(item.qty));
+    }
+    return Array.from(groupedSubtotals.values()).reduce((sum, vendorSubtotal) => sum + calculateServiceFee(vendorSubtotal), 0);
+  }, [items]);
+  const total = subtotal + deliveryFee + serviceFeeTotal;
 
   useEffect(() => {
     (async () => {
@@ -250,7 +258,8 @@ export default function ProductCheckoutPage() {
 
     for (const [vendorId, vendorItems] of vendorMap.entries()) {
       const vendorSubtotal = vendorItems.reduce((sum, it) => sum + Number(it.price) * Number(it.qty), 0);
-      const vendorTotal = vendorSubtotal + DELIVERY_FEE;
+      const vendorPricing = calculateCustomerOrderTotal(vendorSubtotal, DELIVERY_FEE);
+      const vendorTotal = vendorPricing.total;
 
       const { data: order, error: orderErr } = await supabase
         .from("orders")
@@ -535,6 +544,11 @@ export default function ProductCheckoutPage() {
         <div className="flex justify-between">
           <span>Delivery fee ({vendorCount} vendor{vendorCount === 1 ? "" : "s"})</span>
           <span className="font-semibold">{formatNaira(deliveryFee)}</span>
+        </div>
+
+        <div className="flex justify-between">
+          <span>Service fee</span>
+          <span className="font-semibold">{formatNaira(serviceFeeTotal)}</span>
         </div>
 
         <div className="mt-2 flex justify-between text-lg">

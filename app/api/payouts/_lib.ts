@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { buildVendorPricingMap } from "@/lib/pricing";
 
 type Role = "customer" | "vendor_food" | "vendor_products" | "logistics" | "admin";
 
@@ -16,6 +17,9 @@ type PayoutRow = {
 };
 
 type OrderEarnRow = {
+  id: string;
+  status: string | null;
+  created_at: string;
   subtotal: number | null;
   total: number | null;
   total_amount: number | null;
@@ -55,14 +59,6 @@ function readBearerToken(req: Request) {
   const parts = h.split(" ");
   if (parts.length === 2 && parts[0].toLowerCase() === "bearer" && parts[1]) return parts[1].trim();
   return "";
-}
-
-function commissionBase(order: OrderEarnRow) {
-  const subtotal = asNumber(order.subtotal);
-  if (subtotal > 0) return subtotal;
-  const total = asNumber(order.total_amount ?? order.total);
-  const delivery = asNumber(order.delivery_fee);
-  return Math.max(0, total - delivery);
 }
 
 export async function requireActor(req: Request) {
@@ -109,17 +105,15 @@ export async function payoutSummaryForActor(actorId: string, role: Role): Promis
   if (isVendor) {
     const { data: deliveredOrders, error: deliveredErr } = await a
       .from("orders")
-      .select("subtotal,total,total_amount,delivery_fee")
+      .select("id,status,created_at,subtotal,total,total_amount,delivery_fee")
       .eq("vendor_id", actorId)
       .eq("status", "delivered");
 
     if (deliveredErr) throw new Error("Delivered orders error: " + deliveredErr.message);
 
-    earned = ((deliveredOrders ?? []) as OrderEarnRow[]).reduce((sum, o) => {
-      const base = commissionBase(o);
-      const net = Math.max(0, Math.round(base - base * 0.05));
-      return sum + net;
-    }, 0);
+    const deliveredRows = (deliveredOrders ?? []) as OrderEarnRow[];
+    const pricingMap = buildVendorPricingMap(deliveredRows);
+    earned = deliveredRows.reduce((sum, order) => sum + (pricingMap[order.id]?.net ?? 0), 0);
   } else {
     const { data: deliveredJobs, error: jobsErr } = await a
       .from("logistics_jobs")

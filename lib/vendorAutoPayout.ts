@@ -1,10 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 import { paystackCreateTransferRecipient, paystackInitiateTransfer, paystackResolveAccount } from "@/lib/paystack";
 import { sendTransactionalEmail, simpleEmailLayout } from "@/lib/mailer";
+import { buildVendorPricingMap } from "@/lib/pricing";
 
 type OrderRow = {
   id: string;
   vendor_id: string;
+  status: string | null;
+  created_at: string;
   subtotal: number | null;
   total: number | null;
   total_amount: number | null;
@@ -40,25 +43,6 @@ function adminClient() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-function asNumber(x: unknown) {
-  if (typeof x === "number" && Number.isFinite(x)) return x;
-  const n = Number(x);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function commissionBase(order: OrderRow) {
-  const subtotal = asNumber(order.subtotal);
-  if (subtotal > 0) return subtotal;
-  const total = asNumber(order.total_amount ?? order.total);
-  const delivery = asNumber(order.delivery_fee);
-  return Math.max(0, total - delivery);
-}
-
-function vendorNetAmount(order: OrderRow) {
-  const base = commissionBase(order);
-  return Math.max(0, Math.round(base - base * 0.05));
-}
-
 function payoutReference(orderId: string) {
   const compact = orderId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 18);
   return `dashbuy_pickup_${compact}_${Date.now()}`;
@@ -69,14 +53,25 @@ export async function triggerVendorPickupPayout(orderId: string) {
 
   const { data: order, error: orderErr } = await a
     .from("orders")
-    .select("id,vendor_id,subtotal,total,total_amount,delivery_fee")
+    .select("id,vendor_id,status,created_at,subtotal,total,total_amount,delivery_fee")
     .eq("id", orderId)
     .maybeSingle<OrderRow>();
 
   if (orderErr) return { ok: false as const, error: "Order lookup failed: " + orderErr.message };
   if (!order?.vendor_id) return { ok: false as const, error: "Order vendor not found" };
 
-  const amount = vendorNetAmount(order);
+  const { data: vendorOrders, error: vendorOrdersErr } = await a
+    .from("orders")
+    .select("id,status,created_at,subtotal,total,total_amount,delivery_fee")
+    .eq("vendor_id", order.vendor_id)
+    .order("created_at", { ascending: true });
+
+  if (vendorOrdersErr) {
+    return { ok: false as const, error: "Vendor orders lookup failed: " + vendorOrdersErr.message };
+  }
+
+  const pricingMap = buildVendorPricingMap((vendorOrders ?? []) as OrderRow[]);
+  const amount = pricingMap[order.id]?.net ?? 0;
   if (amount <= 0) {
     return { ok: false as const, error: "No payout amount available for this order", amount };
   }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { extractOrderNameFromNotes } from "@/lib/orderName";
+import { buildVendorPricingMap } from "@/lib/pricing";
 
 type OrderRow = {
   id: string;
@@ -27,35 +28,9 @@ type OrderListMeta = {
   buyerName: string;
 };
 
-function safeNumber(x: unknown, fallback = 0) {
-  if (typeof x === "number" && Number.isFinite(x)) return x;
-  if (typeof x === "string") {
-    const n = Number(x);
-    if (Number.isFinite(n)) return n;
-  }
-  return fallback;
-}
-
 function formatNaira(n: number) {
   const v = Math.max(0, Math.floor(n));
   return "₦" + v.toLocaleString();
-}
-
-function computeGross(o: OrderRow) {
-  const subtotal = safeNumber(o.subtotal, 0);
-  if (subtotal > 0) return subtotal;
-  const total = safeNumber(o.total_amount ?? o.total, 0);
-  const delivery = safeNumber(o.delivery_fee, 0);
-  return Math.max(0, total - delivery);
-}
-
-function computePlatformFee(gross: number) {
-  return Math.round(gross * 0.05);
-}
-
-function computeVendorNet(gross: number) {
-  const fee = computePlatformFee(gross);
-  return Math.max(0, gross - fee);
 }
 
 function isPendingPaymentStatus(status: string | null) {
@@ -93,14 +68,6 @@ function friendlyStatus(status: string | null) {
 
 function isSettledStatus(status: string | null) {
   return status === "delivered";
-}
-
-function settlementStage(status: string | null) {
-  const s = (status ?? "").toLowerCase();
-  if (s === "delivered") return "Delivered and settled";
-  if (s === "pending_vendor") return "Pending your confirmation";
-  if (s === "accepted" || s === "pending_pickup" || s === "picked_up") return "Await logistics confirmation";
-  return "Not settled";
 }
 
 export default function VendorOrdersPage() {
@@ -280,19 +247,21 @@ export default function VendorOrdersPage() {
     });
   }, [payableOrders, statusFilter]);
 
+  const pricingMap = useMemo(() => buildVendorPricingMap(payableOrders), [payableOrders]);
+
   const stats = useMemo(() => {
     const deliveredOnly = filtered.filter((o) => isSettledStatus(o.status));
-    const deliveredNet = deliveredOnly.reduce((s, o) => s + computeVendorNet(computeGross(o)), 0);
+    const deliveredNet = deliveredOnly.reduce((s, o) => s + (pricingMap[o.id]?.net ?? 0), 0);
     const pendingConfirmationNet = filtered
       .filter((o) => isPaidStatus(o.status) && !isSettledStatus(o.status))
-      .reduce((s, o) => s + computeVendorNet(computeGross(o)), 0);
+      .reduce((s, o) => s + (pricingMap[o.id]?.net ?? 0), 0);
 
     return {
       count: filtered.length,
       pendingConfirmationNet,
       deliveredNet,
     };
-  }, [filtered]);
+  }, [filtered, pricingMap]);
 
   return (
     <div className="space-y-4">
@@ -350,8 +319,7 @@ export default function VendorOrdersPage() {
         ) : (
           <div className="space-y-2">
             {filtered.map((o) => {
-              const gross = computeGross(o);
-              const shownAmount = isSettledStatus(o.status) ? computeVendorNet(gross) : gross;
+              const shownAmount = pricingMap[o.id]?.net ?? 0;
               const meta = orderMeta[o.id];
               const title = meta?.summary || extractOrderNameFromNotes(o.notes) || "Order items";
               const buyer = meta?.buyerName || "Buyer";

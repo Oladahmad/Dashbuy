@@ -95,6 +95,13 @@ export default function AppShell({ title, children }: AppShellProps) {
   const [productsCount, setProductsCount] = useState(0);
   const [foodCount, setFoodCount] = useState(0);
   const [showWalletPinPrompt, setShowWalletPinPrompt] = useState(false);
+  const [walletPinStep, setWalletPinStep] = useState<"intro" | "form">("intro");
+  const [walletPinEnabled, setWalletPinEnabled] = useState(false);
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [walletPinMsg, setWalletPinMsg] = useState("");
+  const [walletPinSaving, setWalletPinSaving] = useState(false);
 
   useEffect(() => {
     const refresh = () => {
@@ -134,9 +141,11 @@ export default function AppShell({ title, children }: AppShellProps) {
 
       if (!alive) return;
 
-      const role = String(profile?.role ?? "customer").trim().toLowerCase();
-      setShowWalletPinPrompt(role === "customer" && !profile?.wallet_pin_enabled);
-    }
+        const role = String(profile?.role ?? "customer").trim().toLowerCase();
+        const enabled = !!profile?.wallet_pin_enabled;
+        setWalletPinEnabled(enabled);
+        setShowWalletPinPrompt(role === "customer" && !enabled);
+      }
 
     void checkWalletPinPrompt();
     return () => {
@@ -157,6 +166,51 @@ export default function AppShell({ title, children }: AppShellProps) {
   function isActive(href: string) {
     if (href === "/") return pathname === "/";
     return pathname?.startsWith(href);
+  }
+
+  function closeWalletPinPrompt() {
+    setShowWalletPinPrompt(false);
+    setWalletPinStep("intro");
+    setCurrentPin("");
+    setNewPin("");
+    setConfirmPin("");
+    setWalletPinMsg("");
+    setWalletPinSaving(false);
+  }
+
+  async function saveWalletPin() {
+    setWalletPinMsg("");
+    setWalletPinSaving(true);
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token ?? "";
+    if (!token) {
+      setWalletPinSaving(false);
+      router.push("/auth/login");
+      return;
+    }
+
+    const res = await fetch("/api/wallet/pin", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        currentPin,
+        newPin,
+        confirmPin,
+      }),
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    setWalletPinSaving(false);
+    if (!res.ok || !body?.ok) {
+      setWalletPinMsg(body?.error ?? "Unable to save wallet PIN.");
+      return;
+    }
+
+    setWalletPinEnabled(true);
+    closeWalletPinPrompt();
   }
 
   return (
@@ -272,31 +326,106 @@ export default function AppShell({ title, children }: AppShellProps) {
       ) : null}
 
       {showWalletPinPrompt ? (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/45 p-4 sm:items-center">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
-            <p className="text-lg font-semibold text-gray-900">Set your wallet PIN</p>
-            <p className="mt-2 text-sm text-gray-600">
-              Set your 4-digit wallet PIN now so wallet payment works smoothly whenever you want to use it.
-            </p>
-            <div className="mt-5 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className="rounded-xl border px-4 py-3 text-sm"
-                onClick={() => setShowWalletPinPrompt(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="rounded-xl bg-black px-4 py-3 text-sm text-white"
-                onClick={() => {
-                  setShowWalletPinPrompt(false);
-                  router.push("/account");
-                }}
-              >
-                Set PIN
-              </button>
-            </div>
+            {walletPinStep === "intro" ? (
+              <>
+                <p className="text-lg font-semibold text-gray-900">Set your wallet PIN</p>
+                <p className="mt-2 text-sm text-gray-600">
+                  Set your 4-digit wallet PIN now so wallet payment works smoothly whenever you want to use it.
+                </p>
+                <div className="mt-5 grid grid-cols-2 gap-2">
+                  <button type="button" className="rounded-xl border px-4 py-3 text-sm" onClick={closeWalletPinPrompt}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-xl bg-black px-4 py-3 text-sm text-white"
+                    onClick={() => {
+                      setWalletPinStep("form");
+                      setWalletPinMsg("");
+                    }}
+                  >
+                    Proceed
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-lg font-semibold text-gray-900">{walletPinEnabled ? "Reset wallet PIN" : "Set wallet PIN"}</p>
+                <p className="mt-2 text-sm text-gray-600">
+                  Enter your 4-digit PIN details below and save them here without leaving this popup.
+                </p>
+
+                <div className="mt-4 grid gap-3">
+                  {walletPinEnabled ? (
+                    <div>
+                      <p className="text-sm font-medium">Current PIN</p>
+                      <input
+                        className="mt-2 w-full rounded-2xl border p-3"
+                        inputMode="numeric"
+                        maxLength={4}
+                        placeholder="Enter current 4-digit PIN"
+                        value={currentPin}
+                        onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      />
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <p className="text-sm font-medium">New PIN</p>
+                      <input
+                        className="mt-2 w-full rounded-2xl border p-3"
+                        inputMode="numeric"
+                        maxLength={4}
+                        placeholder="Enter new 4-digit PIN"
+                        value={newPin}
+                        onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Confirm PIN</p>
+                      <input
+                        className="mt-2 w-full rounded-2xl border p-3"
+                        inputMode="numeric"
+                        maxLength={4}
+                        placeholder="Confirm new 4-digit PIN"
+                        value={confirmPin}
+                        onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {walletPinMsg ? <p className="mt-3 text-sm text-orange-600">{walletPinMsg}</p> : null}
+
+                <div className="mt-5 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl border px-4 py-3 text-sm"
+                    onClick={() => {
+                      setWalletPinStep("intro");
+                      setCurrentPin("");
+                      setNewPin("");
+                      setConfirmPin("");
+                      setWalletPinMsg("");
+                    }}
+                    disabled={walletPinSaving}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-xl bg-black px-4 py-3 text-sm text-white disabled:opacity-60"
+                    onClick={saveWalletPin}
+                    disabled={walletPinSaving}
+                  >
+                    {walletPinSaving ? "Saving..." : walletPinEnabled ? "Update PIN" : "Save PIN"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       ) : null}

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { fallbackFoodOrderName } from "@/lib/orderName";
 import { withErrandQuoteMeta } from "@/lib/errandQuote";
 import { FOOD_CUSTOMER_LOCATION_OPTIONS, getFoodLocationOptionsForOrigin } from "@/lib/foodDeliveryMatrix";
+import { calculateCustomerOrderTotal, calculateServiceFee } from "@/lib/pricing";
 
 type PlateLine = {
   foodItemId?: string;
@@ -166,7 +167,17 @@ export default function FoodCheckoutPage() {
   );
   const quotedVendorDeliveryTotal = deliveryQuote?.total ?? 0;
   const totalDeliveryFee = quotedVendorDeliveryTotal + customVendorCount * DEFAULT_CUSTOM_REQUEST_DELIVERY_FEE;
-  const total = subtotal + totalDeliveryFee;
+  const serviceFeeTotal = useMemo(() => {
+    const groupedSubtotals = new Map<string, number>();
+    for (const p of plates) {
+      groupedSubtotals.set(p.vendorId, (groupedSubtotals.get(p.vendorId) ?? 0) + Number(p.plateTotal));
+    }
+    for (const c of combos) {
+      groupedSubtotals.set(c.vendorId, (groupedSubtotals.get(c.vendorId) ?? 0) + Number(c.price) * Number(c.qty));
+    }
+    return Array.from(groupedSubtotals.values()).reduce((sum, vendorSubtotal) => sum + calculateServiceFee(vendorSubtotal), 0);
+  }, [plates, combos]);
+  const total = subtotal + totalDeliveryFee + serviceFeeTotal;
   const nonCustomVendorIds = useMemo(
     () => cartVendorIds.filter((vendorId) => vendorId !== CUSTOM_REQUEST_VENDOR_ID),
     [cartVendorIds]
@@ -436,7 +447,8 @@ export default function FoodCheckoutPage() {
         );
         return;
       }
-      const vendorTotal = vendorSubtotal + Number(vendorDeliveryFee ?? 0);
+      const vendorPricing = calculateCustomerOrderTotal(vendorSubtotal, Number(vendorDeliveryFee ?? 0));
+      const vendorTotal = vendorPricing.total;
       const foodMode: "plate" | "combo" = group.plates.length > 0 ? "plate" : "combo";
 
       const candidateNames = [
@@ -472,6 +484,7 @@ export default function FoodCheckoutPage() {
           subtotal: vendorSubtotal,
           delivery_fee: Number(vendorDeliveryFee ?? 0),
           total: vendorTotal,
+          total_amount: vendorTotal,
           delivery_address: deliveryAddressPayload,
           delivery_address_source: "manual",
           customer_phone: phoneClean,
@@ -909,6 +922,10 @@ export default function FoodCheckoutPage() {
         <div className="flex justify-between">
           <span>Delivery fee</span>
           <span className="font-semibold">{customerLocation ? formatNaira(totalDeliveryFee) : "Select location"}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>Service fee</span>
+          <span className="font-semibold">{formatNaira(serviceFeeTotal)}</span>
         </div>
         <div className="mt-2 flex justify-between text-lg">
           <span>Total</span>

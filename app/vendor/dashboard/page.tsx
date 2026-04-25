@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import AppShell from "@/components/AppShell";
+import { buildVendorPricingMap } from "@/lib/pricing";
 
 type Vendor = { id: string; name: string };
 type OrderRow = {
@@ -25,20 +26,6 @@ function shortId(id: string) {
   return id.slice(0, 8);
 }
 
-function safeNumber(x: unknown, fallback = 0) {
-  if (typeof x === "number" && Number.isFinite(x)) return x;
-  const n = Number(x);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function commissionBase(o: OrderRow) {
-  const subtotal = safeNumber(o.subtotal, 0);
-  if (subtotal > 0) return subtotal;
-  const total = safeNumber(o.total_amount ?? o.total, 0);
-  const delivery = safeNumber(o.delivery_fee, 0);
-  return Math.max(0, total - delivery);
-}
-
 export default function VendorDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -53,12 +40,10 @@ export default function VendorDashboardPage() {
   );
 
   const totalRevenue = useMemo(() => {
+    const pricingMap = buildVendorPricingMap(orders.filter((o) => o.status !== "pending_payment"));
     return orders
       .filter((o) => o.status !== "pending_payment")
-      .reduce((sum, o) => {
-        const base = commissionBase(o);
-        return sum + Math.max(0, Math.round(base - base * 0.05));
-      }, 0);
+      .reduce((sum, o) => sum + (pricingMap[o.id]?.net ?? 0), 0);
   }, [orders]);
 
   useEffect(() => {
@@ -179,26 +164,29 @@ export default function VendorDashboardPage() {
               <p className="mt-3 text-sm text-gray-600">No orders yet.</p>
             ) : (
               <div className="mt-3 grid gap-2">
-                {orders.slice(0, 8).map((o) => (
-                  <div key={o.id} className="rounded-xl border p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold">
-                          #{shortId(o.id)}{" "}
-                          <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
-                            {o.order_type}
-                          </span>
-                        </p>
-                        <p className="mt-1 text-xs text-gray-500">{new Date(o.created_at).toLocaleString()}</p>
-                      </div>
+                {(() => {
+                  const pricingMap = buildVendorPricingMap(orders.filter((o) => o.status !== "pending_payment"));
+                  return orders.slice(0, 8).map((o) => (
+                    <div key={o.id} className="rounded-xl border p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold">
+                            #{shortId(o.id)}{" "}
+                            <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
+                              {o.order_type}
+                            </span>
+                          </p>
+                          <p className="mt-1 text-xs text-gray-500">{new Date(o.created_at).toLocaleString()}</p>
+                        </div>
 
-                      <div className="text-right">
-                        <p className="text-sm font-bold">{naira(commissionBase(o))}</p>
-                        <p className="mt-1 text-xs text-gray-600">{o.status}</p>
+                        <div className="text-right">
+                          <p className="text-sm font-bold">{naira(pricingMap[o.id]?.net ?? 0)}</p>
+                          <p className="mt-1 text-xs text-gray-600">{o.status}</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ));
+                })()}
               </div>
             )}
           </div>
