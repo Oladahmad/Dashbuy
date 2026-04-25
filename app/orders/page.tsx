@@ -321,11 +321,6 @@ export default function OrdersPage() {
         <div className="mt-4 grid gap-3">
           {groupedOrders.map((o) => {
             const isPendingPayment = (o.status ?? "").toLowerCase() === "pending_payment";
-            const paymentQuery =
-              o.orders.length > 1
-                ? `/food/pay?orderIds=${encodeURIComponent(o.orders.map((row) => row.id).join(","))}`
-                : `/food/pay?orderId=${encodeURIComponent(o.id)}`;
-
             return (
               <div key={o.id} className="rounded-2xl border bg-white p-4">
                 <button

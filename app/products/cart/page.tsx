@@ -15,7 +15,6 @@ type CartItem = {
 };
 
 const CART_KEY = "dashbuy_products_cart_v1";
-const DELIVERY_FEE = 900;
 
 function naira(n: number) {
   return `₦${Math.round(n).toLocaleString()}`;
@@ -49,13 +48,6 @@ export default function ProductsCartPage() {
     () => items.reduce((sum, it) => sum + Number(it.price) * Number(it.qty), 0),
     [items]
   );
-  const vendorCount = useMemo(
-    () => new Set(items.map((it) => String(it.vendorId ?? "").trim()).filter(Boolean)).size,
-    [items]
-  );
-  const deliveryFee = items.length ? DELIVERY_FEE * Math.max(1, vendorCount) : 0;
-  const total = subtotal + deliveryFee;
-
   function save(nextItems: CartItem[]) {
     setItems(nextItems);
     if (nextItems.length === 0) localStorage.removeItem(CART_KEY);
@@ -179,15 +171,9 @@ export default function ProductsCartPage() {
               <strong>{naira(subtotal)}</strong>
             </div>
 
-            <div className="mt-2 flex justify-between">
-              <span className="text-gray-700">Delivery fee ({vendorCount} vendor{vendorCount === 1 ? "" : "s"})</span>
-              <strong>{naira(deliveryFee)}</strong>
-            </div>
-
-            <div className="mt-2 flex justify-between">
-              <span className="text-gray-700">Total</span>
-              <strong>{naira(total)}</strong>
-            </div>
+            <p className="mt-2 text-sm text-gray-600">
+              Delivery fee will be calculated at checkout based on the vendor route and destination.
+            </p>
 
             <button
               className="mt-4 w-full rounded-xl bg-black px-4 py-3 text-white"

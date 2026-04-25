@@ -5,6 +5,7 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import HomeCarousel from "@/components/HomeCarousel";
 import PwaInstallCard from "@/components/PwaInstallCard";
+import ToastBanner from "@/components/ToastBanner";
 import { supabase } from "@/lib/supabaseClient";
 import { parseRejectReason } from "@/lib/orderRejection";
 
@@ -160,6 +161,12 @@ export default function HomePage() {
   }
 
   useEffect(() => {
+    if (!cartMsg) return;
+    const timer = window.setTimeout(() => setCartMsg(""), 2200);
+    return () => window.clearTimeout(timer);
+  }, [cartMsg]);
+
+  useEffect(() => {
     (async () => {
       setLoading(true);
       setProductsErr("");
@@ -244,6 +251,17 @@ export default function HomePage() {
 
   return (
     <AppShell title="Fast food & products around Ago">
+      {cartMsg ? (
+        <ToastBanner
+          message={cartMsg}
+          actionLabel="View cart"
+          onAction={() => {
+            setCartMsg("");
+            window.location.href = "/products/cart";
+          }}
+          onClose={() => setCartMsg("")}
+        />
+      ) : null}
       <div className="rounded-2xl border bg-white p-5">
         <h1 className="text-xl font-bold sm:text-2xl">What do you want today?</h1>
         <p className="mt-2 text-gray-600">Order food from nearby vendors or shop products.</p>
@@ -311,10 +329,6 @@ export default function HomePage() {
             See all
           </Link>
         </div>
-
-        {cartMsg ? (
-          <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-green-700">{cartMsg}</div>
-        ) : null}
 
         {loading ? (
           <div className="mt-3 rounded-2xl border bg-white p-4 text-sm text-gray-600">Loading products...</div>

@@ -1,5 +1,5 @@
-import AppShell from "@/components/AppShell";
+import FoodLayoutClient from "./foodLayoutClient";
 
 export default function FoodLayout({ children }: { children: React.ReactNode }) {
-  return <AppShell title="Food">{children}</AppShell>;
+  return <FoodLayoutClient>{children}</FoodLayoutClient>;
 }

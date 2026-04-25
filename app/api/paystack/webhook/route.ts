@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { creditWalletFromPaystack } from "@/lib/walletCredit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { notifyOrderEvent } from "@/lib/orderNotifications";
 import { Resend } from "resend";
 
 async function sendMismatchEmail(params: {
@@ -85,6 +86,59 @@ export async function POST(req: Request) {
 
     if (type === "wallet_topup" && customerId && reference && amount > 0) {
       await creditWalletFromPaystack({ customerId, amount, reference });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (type === "orders" && reference && amount > 0) {
+      const orderLookup = await supabaseAdmin
+        .from("orders")
+        .select("id,status,vendor_id,customer_id,order_type,total,total_amount")
+        .eq("paystack_reference", reference);
+
+      if (orderLookup.error) {
+        return NextResponse.json({ ok: false, error: orderLookup.error.message }, { status: 500 });
+      }
+
+      const orders =
+        ((orderLookup.data as
+          | Array<{
+              id: string;
+              status: string | null;
+              vendor_id: string;
+              customer_id: string;
+              order_type: string;
+              total: number | null;
+              total_amount: number | null;
+            }>
+          | null) ?? []);
+
+      const pendingOrderIds = orders.filter((order) => order.status === "pending_payment").map((order) => order.id);
+      if (pendingOrderIds.length > 0) {
+        const updateRes = await supabaseAdmin
+          .from("orders")
+          .update({ status: "pending_vendor", paystack_reference: reference })
+          .in("id", pendingOrderIds);
+
+        if (updateRes.error) {
+          return NextResponse.json({ ok: false, error: updateRes.error.message }, { status: 500 });
+        }
+
+        await Promise.allSettled(
+          orders
+            .filter((order) => pendingOrderIds.includes(order.id))
+            .map((order) =>
+              notifyOrderEvent({
+                event: "order_paid",
+                orderId: order.id,
+                vendorId: order.vendor_id,
+                customerId: order.customer_id,
+                amountNaira: order.total_amount ?? order.total,
+                orderType: order.order_type,
+              })
+            )
+        );
+      }
+
       return NextResponse.json({ ok: true });
     }
 

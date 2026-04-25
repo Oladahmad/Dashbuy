@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { normalizeProductCategory } from "@/lib/productCategories";
 import { useParams, useRouter } from "next/navigation";
+import ToastBanner from "@/components/ToastBanner";
 
 type ProfileLite = {
   store_name: string | null;
@@ -60,6 +61,7 @@ export default function ProductDetailsPage() {
   const [p, setP] = useState<ProductRow | null>(null);
   const [qty, setQty] = useState<number>(1);
   const [msg, setMsg] = useState<string>("Loading...");
+  const [cartToast, setCartToast] = useState("");
 
   const vendorDisplayName = useMemo(() => {
     const prof = p?.profiles;
@@ -127,14 +129,31 @@ export default function ProductDetailsPage() {
     }
 
     localStorage.setItem(CART_KEY, JSON.stringify(cart));
-    router.push("/products/cart");
+    setCartToast(`${p.name} added to cart`);
   }
+
+  useEffect(() => {
+    if (!cartToast) return;
+    const timer = window.setTimeout(() => setCartToast(""), 2200);
+    return () => window.clearTimeout(timer);
+  }, [cartToast]);
 
   if (msg) return <main className="p-6">{msg}</main>;
   if (!p) return <main className="p-6">Not found</main>;
 
   return (
     <main className="p-6 max-w-xl">
+      {cartToast ? (
+        <ToastBanner
+          message={cartToast}
+          actionLabel="View cart"
+          onAction={() => {
+            setCartToast("");
+            router.push("/products/cart");
+          }}
+          onClose={() => setCartToast("")}
+        />
+      ) : null}
       <h1 className="text-xl font-bold sm:text-2xl">{p.name}</h1>
 
       <p className="mt-1 text-xs text-gray-500">

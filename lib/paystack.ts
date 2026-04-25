@@ -119,3 +119,27 @@ export async function paystackInitiateTransfer(params: {
     }),
   });
 }
+
+export async function paystackCreateRefund(params: {
+  transaction: string;
+  amountKobo?: number;
+  currency?: string;
+  customerNote?: string;
+  merchantNote?: string;
+}) {
+  return paystackFetch<{
+    id?: number;
+    status?: string;
+    amount?: number;
+    currency?: string;
+  }>("/refund", {
+    method: "POST",
+    body: JSON.stringify({
+      transaction: params.transaction,
+      amount: params.amountKobo ?? undefined,
+      currency: params.currency ?? "NGN",
+      customer_note: params.customerNote ?? undefined,
+      merchant_note: params.merchantNote ?? undefined,
+    }),
+  });
+}

@@ -47,7 +47,6 @@ type FoodCart = {
 
 const FOOD_CART_KEY = "dashbuy_food_cart_v1";
 const LEGACY_COMBO_CART_KEY = "dashbuy_combo_cart_v1";
-const DELIVERY_FEE = 900;
 
 function formatNaira(n: number) {
   return `N${Math.round(n).toLocaleString()}`;
@@ -101,17 +100,20 @@ export default function FoodCartPage() {
   const [vendorName, setVendorName] = useState<string>("");
 
   useEffect(() => {
-    const c = readCart();
-    const legacyCombos = readLegacyComboCart();
-    const mergedCombos = c.combos.length > 0 ? c.combos : legacyCombos;
-    const resolvedVendorId = c.vendorId ?? mergedCombos[0]?.vendorId ?? c.plates[0]?.vendorId ?? null;
+    const timer = window.setTimeout(() => {
+      const c = readCart();
+      const legacyCombos = readLegacyComboCart();
+      const mergedCombos = c.combos.length > 0 ? c.combos : legacyCombos;
+      const resolvedVendorId = c.vendorId ?? mergedCombos[0]?.vendorId ?? c.plates[0]?.vendorId ?? null;
 
-    setVendorId(resolvedVendorId);
-    setPlates(c.plates);
-    setCombos(mergedCombos);
-    setVendorName(c.plates[0]?.vendorName ?? mergedCombos[0]?.vendorName ?? "");
-    writeCart(resolvedVendorId, c.plates, mergedCombos);
-    localStorage.removeItem(LEGACY_COMBO_CART_KEY);
+      setVendorId(resolvedVendorId);
+      setPlates(c.plates);
+      setCombos(mergedCombos);
+      setVendorName(c.plates[0]?.vendorName ?? mergedCombos[0]?.vendorName ?? "");
+      writeCart(resolvedVendorId, c.plates, mergedCombos);
+      localStorage.removeItem(LEGACY_COMBO_CART_KEY);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const subtotal = useMemo(() => {
@@ -119,19 +121,6 @@ export default function FoodCartPage() {
     const comboTotal = combos.reduce((sum, c) => sum + Number(c.price) * Number(c.qty), 0);
     return plateTotal + comboTotal;
   }, [plates, combos]);
-  const vendorCount = useMemo(() => {
-    const ids = new Set<string>();
-    for (const p of plates) {
-      if (p.vendorId) ids.add(p.vendorId);
-    }
-    for (const c of combos) {
-      if (c.vendorId) ids.add(c.vendorId);
-    }
-    return ids.size;
-  }, [plates, combos]);
-  const deliveryFee = vendorCount > 0 ? DELIVERY_FEE * vendorCount : 0;
-  const total = subtotal + deliveryFee;
-
   function removePlate(index: number) {
     const nextPlates = plates.filter((_, i) => i !== index);
     setPlates(nextPlates);
@@ -303,9 +292,8 @@ export default function FoodCartPage() {
             <p className="text-sm text-gray-600">Subtotal</p>
             <p className="text-xl font-bold">{formatNaira(subtotal)}</p>
             <p className="mt-1 text-sm text-gray-600">
-              Delivery fee ({vendorCount} vendor{vendorCount === 1 ? "" : "s"}): {formatNaira(deliveryFee)}
+              Delivery fee will be calculated at checkout based on your restaurant route and location.
             </p>
-            <p className="mt-1 text-sm font-semibold">Total: {formatNaira(total)}</p>
 
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
               <button

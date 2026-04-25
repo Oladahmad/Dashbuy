@@ -14,7 +14,7 @@ function PayCallbackPageInner() {
       if (startedRef.current) return;
       startedRef.current = true;
 
-      const reference = sp.get("transaction_ref") || sp.get("reference");
+      const reference = sp.get("transaction_ref") || sp.get("reference") || sp.get("trxref");
 
       if (!reference) {
         setMsg("Missing payment reference. Payment cannot be verified.");

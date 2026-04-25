@@ -2,8 +2,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { ReactNode, useMemo } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { ReactNode, useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 
 type NavItem = {
   href: string;
@@ -24,8 +25,50 @@ export default function VendorShell({
   navItems,
 }: VendorShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [showBankPrompt, setShowBankPrompt] = useState(false);
 
   const items = useMemo(() => navItems.slice(0, 4), [navItems]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function checkBankPrompt() {
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+      if (!user) {
+        if (alive) setShowBankPrompt(false);
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role,bank_name,bank_account_number,bank_account_name")
+        .eq("id", user.id)
+        .maybeSingle<{
+          role?: string | null;
+          bank_name?: string | null;
+          bank_account_number?: string | null;
+          bank_account_name?: string | null;
+        }>();
+
+      if (!alive) return;
+
+      const role = String(profile?.role ?? "").trim().toLowerCase();
+      const isVendor = role === "vendor_food" || role === "vendor_products";
+      const missingBank =
+        !String(profile?.bank_name ?? "").trim() ||
+        !String(profile?.bank_account_number ?? "").trim() ||
+        !String(profile?.bank_account_name ?? "").trim();
+
+      setShowBankPrompt(isVendor && missingBank);
+    }
+
+    void checkBankPrompt();
+    return () => {
+      alive = false;
+    };
+  }, [pathname]);
 
   function isActive(href: string) {
     if (href === "/vendor") return pathname === "/vendor";
@@ -68,6 +111,36 @@ export default function VendorShell({
             })}
           </div>
         </nav>
+      ) : null}
+
+      {showBankPrompt ? (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/45 p-4 sm:items-center">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+            <p className="text-lg font-semibold text-gray-900">Set account details</p>
+            <p className="mt-2 text-sm text-gray-600">
+              Add your bank account details so vendor payouts can get to you quickly once orders are delivered.
+            </p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className="rounded-xl border px-4 py-3 text-sm"
+                onClick={() => setShowBankPrompt(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-black px-4 py-3 text-sm text-white"
+                onClick={() => {
+                  setShowBankPrompt(false);
+                  router.push("/vendor/withdraw");
+                }}
+              >
+                Set details
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

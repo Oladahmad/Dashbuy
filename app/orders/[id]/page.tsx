@@ -460,13 +460,6 @@ export default function OrderDetailsPage() {
     return [[vendor, plateItems]] as [string, PlateItemRow[]][];
   }, [order, vendorNames, productItems, comboItems, plateItems]);
 
-  const paymentQuery = useMemo(() => {
-    if (!order) return "";
-    return order.orderIds.length > 1
-      ? `/food/pay?orderIds=${encodeURIComponent(order.orderIds.join(","))}`
-      : `/food/pay?orderId=${encodeURIComponent(order.id)}`;
-  }, [order]);
-
   async function approveQuoteAndPay() {
     if (!order) return;
     setApprovingQuote(true);

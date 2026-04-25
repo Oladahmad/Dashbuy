@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 
 type AppShellProps = {
   title: string;
@@ -90,14 +91,10 @@ export default function AppShell({ title, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const [mounted, setMounted] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [productsCount, setProductsCount] = useState(0);
   const [foodCount, setFoodCount] = useState(0);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const [showWalletPinPrompt, setShowWalletPinPrompt] = useState(false);
 
   useEffect(() => {
     const refresh = () => {
@@ -118,6 +115,35 @@ export default function AppShell({ title, children }: AppShellProps) {
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+
+    async function checkWalletPinPrompt() {
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+      if (!user) {
+        if (alive) setShowWalletPinPrompt(false);
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role,wallet_pin_enabled")
+        .eq("id", user.id)
+        .maybeSingle<{ role?: string | null; wallet_pin_enabled?: boolean | null }>();
+
+      if (!alive) return;
+
+      const role = String(profile?.role ?? "customer").trim().toLowerCase();
+      setShowWalletPinPrompt(role === "customer" && !profile?.wallet_pin_enabled);
+    }
+
+    void checkWalletPinPrompt();
+    return () => {
+      alive = false;
+    };
+  }, [pathname]);
+
   const totalCount = useMemo(() => productsCount + foodCount, [productsCount, foodCount]);
 
   const nav = [
@@ -129,7 +155,6 @@ export default function AppShell({ title, children }: AppShellProps) {
   ];
 
   function isActive(href: string) {
-    if (!mounted) return false;
     if (href === "/") return pathname === "/";
     return pathname?.startsWith(href);
   }
@@ -240,6 +265,36 @@ export default function AppShell({ title, children }: AppShellProps) {
                 }}
               >
                 View orders
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showWalletPinPrompt ? (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/45 p-4 sm:items-center">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+            <p className="text-lg font-semibold text-gray-900">Set your wallet PIN</p>
+            <p className="mt-2 text-sm text-gray-600">
+              Set your 4-digit wallet PIN now so wallet payment works smoothly whenever you want to use it.
+            </p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className="rounded-xl border px-4 py-3 text-sm"
+                onClick={() => setShowWalletPinPrompt(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-black px-4 py-3 text-sm text-white"
+                onClick={() => {
+                  setShowWalletPinPrompt(false);
+                  router.push("/account");
+                }}
+              >
+                Set PIN
               </button>
             </div>
           </div>

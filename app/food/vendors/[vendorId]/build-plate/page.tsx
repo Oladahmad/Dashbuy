@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import ToastBanner from "@/components/ToastBanner";
 
 type Vendor = {
   id: string;
@@ -138,6 +139,7 @@ function BuildPlatePageInner() {
   const [variants, setVariants] = useState<Variant[]>([]);
   const [msg, setMsg] = useState("Loading...");
   const [editingPlateAt, setEditingPlateAt] = useState<string | null>(null);
+  const [cartToast, setCartToast] = useState("");
 
   const [qtyById, setQtyById] = useState<Record<string, number>>({});
   const [variantById, setVariantById] = useState<Record<string, string>>({});
@@ -396,14 +398,30 @@ function BuildPlatePageInner() {
       plates: nextPlates,
       combos: existing.combos,
     });
-
-    router.push("/food/cart");
+    setCartToast(editingPlateAt ? "Plate updated in cart" : "Plate added to cart");
   }
+
+  useEffect(() => {
+    if (!cartToast) return;
+    const timer = window.setTimeout(() => setCartToast(""), 2200);
+    return () => window.clearTimeout(timer);
+  }, [cartToast]);
 
   if (msg) return <main className="p-6">{msg}</main>;
 
   return (
     <main className="mx-auto max-w-4xl space-y-4 p-4">
+      {cartToast ? (
+        <ToastBanner
+          message={cartToast}
+          actionLabel="View cart"
+          onAction={() => {
+            setCartToast("");
+            router.push("/food/cart");
+          }}
+          onClose={() => setCartToast("")}
+        />
+      ) : null}
       <button
         type="button"
         className="rounded-xl border px-3 py-2 text-sm"

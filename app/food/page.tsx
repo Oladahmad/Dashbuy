@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ToastBanner from "@/components/ToastBanner";
 
 type ComboRow = {
   id: string;
@@ -101,18 +102,22 @@ export default function FoodHubPage() {
   const [q, setQ] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedCombo, setSelectedCombo] = useState<ComboRow | null>(null);
+  const [cartToast, setCartToast] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const sp = new URLSearchParams(window.location.search);
-    const tabParam = (sp.get("tab") || "").toLowerCase();
-    if (tabParam === "restaurants") {
-      setTab("restaurants");
-      return;
-    }
-    if (tabParam === "combos") {
-      setTab("combos");
-    }
+    const timer = window.setTimeout(() => {
+      const sp = new URLSearchParams(window.location.search);
+      const tabParam = (sp.get("tab") || "").toLowerCase();
+      if (tabParam === "restaurants") {
+        setTab("restaurants");
+        return;
+      }
+      if (tabParam === "combos") {
+        setTab("combos");
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -153,7 +158,7 @@ export default function FoodHubPage() {
 
   function addComboToCart(combo: ComboRow) {
     if (combo.is_vendor_open === false) {
-      alert(`${pickVendorName(combo.profiles)} is currently closed.`);
+      setMsg(`${pickVendorName(combo.profiles)} is currently closed.`);
       return;
     }
     if (!combo.vendor_id) return;
@@ -176,14 +181,31 @@ export default function FoodHubPage() {
     }
 
     writeFoodCart(cart);
-    alert("Added to cart");
+    setCartToast(`${combo.name} added to cart`);
   }
+
+  useEffect(() => {
+    if (!cartToast) return;
+    const timer = window.setTimeout(() => setCartToast(""), 2200);
+    return () => window.clearTimeout(timer);
+  }, [cartToast]);
 
   if (loading) return <main className="p-6">Loading...</main>;
   const detailsVendorName = selectedCombo ? pickVendorName(selectedCombo.profiles) : "Vendor";
 
   return (
     <main className="p-4 max-w-6xl mx-auto">
+      {cartToast ? (
+        <ToastBanner
+          message={cartToast}
+          actionLabel="View cart"
+          onAction={() => {
+            setCartToast("");
+            window.location.href = "/food/cart";
+          }}
+          onClose={() => setCartToast("")}
+        />
+      ) : null}
       <h1 className="text-xl font-bold sm:text-2xl">Food</h1>
 
       <div className="mt-4 flex gap-2">

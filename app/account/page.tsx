@@ -268,7 +268,10 @@ export default function AccountPage() {
   }
 
   useEffect(() => {
-    loadWalletBalance();
+    const timer = window.setTimeout(() => {
+      void loadWalletBalance();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {

@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
+import ToastBanner from "@/components/ToastBanner";
 import { supabase } from "@/lib/supabaseClient";
 import { PRODUCT_CATEGORIES, normalizeProductCategory } from "@/lib/productCategories";
 import { useRouter } from "next/navigation";
@@ -82,6 +83,7 @@ export default function ProductsPage() {
   const [qty, setQty] = useState(1);
 
   const [cartCount, setCartCount] = useState(0);
+  const [cartToast, setCartToast] = useState("");
 
   function refreshCartCount() {
     const cart = readCart();
@@ -179,8 +181,15 @@ export default function ProductsPage() {
 
     writeCart(cart);
     refreshCartCount();
+    setCartToast(`${activeProduct.name} added to cart`);
     setDrawerOpen(false);
   }
+
+  useEffect(() => {
+    if (!cartToast) return;
+    const timer = window.setTimeout(() => setCartToast(""), 2200);
+    return () => window.clearTimeout(timer);
+  }, [cartToast]);
 
   function clearFilters() {
     setCat("all");
@@ -190,6 +199,17 @@ export default function ProductsPage() {
 
   return (
     <AppShell title="Products">
+      {cartToast ? (
+        <ToastBanner
+          message={cartToast}
+          actionLabel="View cart"
+          onAction={() => {
+            setCartToast("");
+            router.push("/products/cart");
+          }}
+          onClose={() => setCartToast("")}
+        />
+      ) : null}
       <div className="rounded-2xl bg-black p-3">
         <div className="flex items-center gap-2">
           <input
