@@ -522,14 +522,22 @@ export default function VendorFoodPage() {
             <p className="text-sm text-gray-600">Your foods</p>
             <p className="text-base font-semibold">Singles and combos</p>
           </div>
-
-          <button
-            type="button"
-            className="rounded-xl bg-black px-4 py-3 text-sm text-white"
-            onClick={() => router.push("/vendor/food/new")}
-          >
-            Add food
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="rounded-xl border px-4 py-3 text-sm"
+              onClick={() => router.push("/vendor/food/import")}
+            >
+              Import Menu with AI
+            </button>
+            <button
+              type="button"
+              className="rounded-xl bg-black px-4 py-3 text-sm text-white"
+              onClick={() => router.push("/vendor/food/new")}
+            >
+              Add food
+            </button>
+          </div>
         </div>
 
         {msg ? <p className="mt-3 text-sm text-red-600">{msg}</p> : null}

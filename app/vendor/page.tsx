@@ -436,6 +436,11 @@ export default function VendorDashboardPage() {
           <Link href={addHref} className="w-full rounded-xl bg-black px-4 py-3 text-center text-white">
             {isFoodVendor ? "Add new food" : "Add new product"}
           </Link>
+          {isFoodVendor ? (
+            <Link href="/vendor/food/import" className="w-full rounded-xl border px-4 py-3 text-center">
+              Import Menu with AI
+            </Link>
+          ) : null}
           <Link href="/vendor/manual" className="w-full rounded-xl border px-4 py-3 text-center">
             Manual customer order
           </Link>
