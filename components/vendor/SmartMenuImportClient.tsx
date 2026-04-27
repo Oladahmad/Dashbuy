@@ -209,6 +209,16 @@ export default function SmartMenuImportClient() {
 
   return (
     <div className="space-y-4">
+      <div>
+        <button
+          type="button"
+          className="rounded-xl border bg-white px-4 py-2 text-sm"
+          onClick={() => router.push("/vendor/food")}
+        >
+          Back to foods
+        </button>
+      </div>
+
       <div className="rounded-3xl border bg-white p-5">
         <p className="text-sm text-gray-600">Import Menu with AI</p>
         <h1 className="mt-1 text-xl font-semibold">Upload a menu sheet, scan, PDF, or food photo</h1>
