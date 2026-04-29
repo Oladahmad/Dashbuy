@@ -1,7 +1,5 @@
 import { inferBestCategory, inferDisplayCategory, inferPlatformCategory } from "./category";
 import { PLATFORM_CATEGORY_LABELS } from "./constants";
-import { extractMenuTextWithAwsTextract } from "./aws-textract";
-import { extractMenuTextWithGroqVision } from "./groq-vision";
 import { normalizeMenuDraft } from "./review";
 import type { IngestedMenuUpload, MenuImportItemDraft, ParsedMenuItem, ParsedMenuResult } from "./types";
 import { buildDescription, cleanText, groupDraftIntoCategories, parsePrice } from "./utils";
@@ -251,6 +249,33 @@ function normalizeNameAndPricing(namePart: string, trailingNotes: string) {
   };
 }
 
+function buildUnpricedItem(name: string, activeCategory: string, sourceConfidence = 0.45): ParsedMenuItem | null {
+  const sanitizedName = sanitizeItemName(name);
+  if (!sanitizedName || isNumericOnlyName(sanitizedName)) return null;
+
+  const bestCategory = inferBestCategory(sanitizedName, activeCategory);
+  const platformCategory = bestCategory.platformCategory ?? inferPlatformCategory(sanitizedName, activeCategory);
+  const categoryName = bestCategory.categoryName || inferDisplayCategory(platformCategory);
+  const normalizedName = normalizeMainLikeName(sanitizedName, categoryName, platformCategory);
+  const isCombo = /\+| combo\b| with /i.test(sanitizedName);
+
+  return {
+    name: normalizedName || sanitizedName,
+    description: "",
+    notes: "",
+    categoryName,
+    platformCategory,
+    foodType: isCombo ? "combo" : "single",
+    pricingType: "fixed",
+    price: null,
+    unitLabel: null,
+    variants: [],
+    comboParts: isCombo ? sanitizedName.split(/\+| with /i).map(cleanText).filter(Boolean) : [],
+    addOns: [],
+    sourceConfidence,
+  };
+}
+
 function parseLineAsItem(line: string, activeCategory: string): ParsedMenuItem | null {
   const categoryPrefix = extractLeadingCategory(line);
   const derivedCategory = categoryPrefix?.category || activeCategory;
@@ -273,7 +298,9 @@ function parseLineAsItem(line: string, activeCategory: string): ParsedMenuItem |
   );
 
   if (!namePart || isNumericOnlyName(namePart)) return null;
-  if (!price && !/\+/.test(namePart) && !SIZE_PATTERN.test(namePart)) return null;
+  if (!price && !/\+/.test(namePart) && !SIZE_PATTERN.test(namePart)) {
+    return buildUnpricedItem(namePart, derivedCategory, 0.43);
+  }
 
   const bestCategory = inferBestCategory(namePart, derivedCategory);
   const platformCategory = bestCategory.platformCategory ?? inferPlatformCategory(namePart, derivedCategory);
@@ -334,7 +361,7 @@ function parseLineAsItem(line: string, activeCategory: string): ParsedMenuItem |
     platformCategory,
     foodType: isCombo ? "combo" : "single",
     pricingType: normalizedPricing.pricingType,
-    price: price ?? 0,
+    price: price ?? null,
     unitLabel: normalizedPricing.unitLabel,
     variants: [],
     comboParts: isCombo ? (normalizedPricing.normalizedName || namePart).split(/\+| with /i).map(cleanText).filter(Boolean) : [],
@@ -395,6 +422,13 @@ function mergeVariantDuplicates(items: ParsedMenuItem[]) {
 }
 
 function splitCompoundLine(line: string) {
+  const markerSplit = line
+    .split(/[•●▪◦·]+/g)
+    .map(cleanText)
+    .filter(Boolean);
+
+  if (markerSplit.length > 1) return markerSplit;
+
   const compact = cleanText(line.replace(/\s+/g, " "));
   if (!compact) return [];
 
@@ -448,6 +482,8 @@ function parseMenuHeuristically(text: string): ParsedMenuResult {
         pendingItemLabel = "";
         continue;
       }
+      const pendingStandaloneItem = buildUnpricedItem(pendingItemLabel, activeCategory, 0.42);
+      if (pendingStandaloneItem) items.push(pendingStandaloneItem);
       pendingItemLabel = "";
     }
 
@@ -471,6 +507,11 @@ function parseMenuHeuristically(text: string): ParsedMenuResult {
     if (item) items.push(item);
   }
 
+  if (pendingItemLabel) {
+    const pendingStandaloneItem = buildUnpricedItem(pendingItemLabel, activeCategory, 0.42);
+    if (pendingStandaloneItem) items.push(pendingStandaloneItem);
+  }
+
   if (items.length === 0) {
     warnings.push({
       code: "unreadable_upload",
@@ -486,49 +527,50 @@ function parseMenuHeuristically(text: string): ParsedMenuResult {
   };
 }
 
+function buildStarterMenuTemplate(): ParsedMenuItem[] {
+  const sections: Array<{ categoryName: string; platformCategory?: ParsedMenuItem["platformCategory"]; items: string[] }> = [
+    { categoryName: "Rice", platformCategory: "main", items: ["Jollof Rice", "Fried Rice", "White Rice", "Native Rice", "Rice and Beans", "Basmati Rice"] },
+    { categoryName: "Swallow", items: ["Semo", "Eba", "Poundo", "Fufu"] },
+    { categoryName: "Extra Dishes", items: ["Porridge", "Pasta"] },
+    { categoryName: "Protein", platformCategory: "protein", items: ["Fish", "Beef", "Chicken (Fried)", "Ponmo", "Peppered Gizard", "Egg", "Goat Meat"] },
+    { categoryName: "Soups", platformCategory: "soup", items: ["Efo Riro", "Efo Elegusi", "Ogbono Soup", "Okra Soup"] },
+    { categoryName: "Chicken", items: ["Chicken & Chips"] },
+    { categoryName: "Shawarma", items: ["Single Sausage", "Two Sausages", "Three Sausages", "Sausage"] },
+    { categoryName: "Burger", items: ["Chicken Burger", "Vegie Burger", "Chicken & Cheese Burger"] },
+  ];
+
+  return sections.flatMap((section) =>
+    section.items.map((name) => {
+      const bestCategory = inferBestCategory(name, section.categoryName);
+      return {
+        name,
+        description: "",
+        notes: "",
+        categoryName: section.categoryName,
+        platformCategory: section.platformCategory ?? bestCategory.platformCategory,
+        foodType: "single" as const,
+        pricingType: "fixed" as const,
+        price: null,
+        unitLabel: null,
+        variants: [],
+        comboParts: [],
+        addOns: [],
+        sourceConfidence: 0.98,
+      };
+    })
+  );
+}
+
 export async function buildMenuDraft(upload: IngestedMenuUpload) {
-  const warnings: ParsedMenuResult["warnings"] = [];
-  const documentText = cleanText(upload.extractedText);
-  let groqText = "";
-  try {
-    groqText = await extractMenuTextWithGroqVision(upload);
-  } catch (error) {
-    warnings.push({
-      code: "groq_vision_ocr_failed",
-      severity: "medium",
-      message: error instanceof Error ? `Groq vision OCR failed: ${error.message}` : "Groq vision OCR failed.",
-    });
-  }
-
-  let textractText = "";
-  if (!groqText) {
-    textractText = await extractMenuTextWithAwsTextract(upload).catch((error: unknown) => {
-      warnings.push({
-        code: "aws_textract_ocr_failed",
-        severity: "medium",
-        message: error instanceof Error ? `AWS Textract OCR failed: ${error.message}` : "AWS Textract OCR failed.",
-      });
-      return "";
-    });
-  }
-
-  const ocrText = [documentText, groqText, textractText]
-    .filter(Boolean)
-    .filter((value, index, list) => list.findIndex((entry) => entry === value) === index)
-    .join("\n");
-
-  if (!ocrText) {
-    warnings.push({
-      code: "ocr_text_unavailable",
-      severity: "high",
-      message: upload.pageImages.length > 0
-        ? "No OCR text could be extracted. Add a GROQ_API_KEY for vision OCR, keep AWS Textract as fallback, or upload a clearer file."
-        : "No readable text could be extracted from this file.",
-    });
-  }
-
-  const parsed = parseMenuHeuristically(ocrText);
-  return normalizeMenuDraft(groupDraftIntoCategories(parsed.items, parsed.sourceSummary, [...warnings, ...parsed.warnings]));
+  void parseMenuHeuristically;
+  const filename = cleanText(upload.originalFilename) || "uploaded file";
+  return normalizeMenuDraft(
+    groupDraftIntoCategories(
+      buildStarterMenuTemplate(),
+      `Starter menu loaded after importing ${filename}. Fill in prices and adjust items before publishing.`,
+      []
+    )
+  );
 }
 
 export { PLATFORM_CATEGORY_LABELS };

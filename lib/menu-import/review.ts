@@ -83,14 +83,6 @@ function getDraftQualityWarnings(categories: MenuImportCategoryDraft[]) {
         });
       }
 
-      if (!item.imageUrl) {
-        warnings.push({
-          code: "missing_item_image",
-          severity: "low",
-          message: `${item.name || "An item"} has no image yet. The vendor can still publish after review.`,
-        });
-      }
-
       if (item.lowConfidence) {
         warnings.push({
           code: "low_confidence_item",

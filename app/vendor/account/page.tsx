@@ -6,6 +6,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import {
+  DEFAULT_CLOSE_TIME,
+  DEFAULT_OPEN_TIME,
   STORE_DAY_KEYS,
   dayLabel,
   emptyStoreHours,
@@ -35,13 +37,6 @@ type ProfileRow = {
   bank_name: string | null;
   bank_account_number: string | null;
   bank_account_name: string | null;
-};
-
-type PayoutRow = {
-  id: string;
-  amount: number;
-  created_at: string;
-  reference: string | null;
 };
 
 function clean(s: string) {
@@ -117,16 +112,13 @@ export default function VendorAccountPage() {
   const [isStoreOpen, setIsStoreOpen] = useState(true);
   const [storeClosedNote, setStoreClosedNote] = useState("");
   const [storeHours, setStoreHours] = useState<StoreHours>(emptyStoreHours());
+  const [hoursModalOpen, setHoursModalOpen] = useState(false);
+  const [hoursDraft, setHoursDraft] = useState<StoreHours>(emptyStoreHours());
+  const [availabilitySaving, setAvailabilitySaving] = useState(false);
 
   const [bankName, setBankName] = useState("");
   const [bankAccountNumber, setBankAccountNumber] = useState("");
   const [bankAccountName, setBankAccountName] = useState("");
-  const [editingBank, setEditingBank] = useState(false);
-  const [savingBankOnly, setSavingBankOnly] = useState(false);
-
-  const [showPayouts, setShowPayouts] = useState(false);
-  const [payoutsLoading, setPayoutsLoading] = useState(false);
-  const [payouts, setPayouts] = useState<PayoutRow[]>([]);
 
   const canUseVendorPage = useMemo(() => {
     return profile ? isVendorRole(profile.role) : false;
@@ -154,9 +146,10 @@ export default function VendorAccountPage() {
     [isStoreOpen, storeHours, storeClosedNote]
   );
 
-  const bankMissing = useMemo(() => {
-    return isBlank(bankName) || isBlank(bankAccountNumber) || isBlank(bankAccountName);
-  }, [bankName, bankAccountNumber, bankAccountName]);
+  const hasCustomStoreHours = useMemo(
+    () => STORE_DAY_KEYS.some((day) => storeHours[day].enabled && storeHours[day].open && storeHours[day].close),
+    [storeHours]
+  );
 
   useEffect(() => {
     let alive = true;
@@ -386,6 +379,7 @@ export default function VendorAccountPage() {
     setIsStoreOpen(profile.is_store_open !== false);
     setStoreClosedNote(profile.store_closed_note ?? "");
     setStoreHours(normalizeStoreHours(profile.store_hours_json));
+    setHoursDraft(normalizeStoreHours(profile.store_hours_json));
 
     setLogoFile(null);
 
@@ -397,60 +391,6 @@ export default function VendorAccountPage() {
     setErr(null);
     setOk(null);
     router.push("/auth/reset-password");
-  }
-
-  async function saveBankDetailsOnly() {
-    if (!profile) {
-      setErr("Profile not loaded");
-      return;
-    }
-
-    const bn = clean(bankName);
-    const ban = clean(bankAccountName);
-    const bac = clean(bankAccountNumber);
-
-    if (!bn) {
-      setErr("Bank name is required");
-      return;
-    }
-    if (!bac || bac.length < 10) {
-      setErr("Enter a valid account number");
-      return;
-    }
-    if (!ban) {
-      setErr("Account name is required");
-      return;
-    }
-
-    setErr(null);
-    setOk(null);
-    setSavingBankOnly(true);
-
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        bank_code: profile.bank_code ?? null,
-        bank_name: bn,
-        bank_account_number: bac,
-        bank_account_name: ban,
-      })
-      .eq("id", profile.id);
-
-    setSavingBankOnly(false);
-    if (error) {
-      setErr(error.message);
-      return;
-    }
-
-    setProfile({
-      ...profile,
-      bank_code: profile.bank_code ?? null,
-      bank_name: bn,
-      bank_account_number: bac,
-      bank_account_name: ban,
-    });
-    setEditingBank(false);
-    setOk("Bank details saved");
   }
 
   async function onLogout() {
@@ -466,41 +406,11 @@ export default function VendorAccountPage() {
     setOk("Delete request sent. Support will contact you.");
   }
 
-  async function loadPayoutsInline() {
-    if (payoutsLoading) return;
-
-    setPayoutsLoading(true);
-    setErr(null);
-
-    const { data: u } = await supabase.auth.getUser();
-    const user = u?.user;
-    if (!user) {
-      setPayoutsLoading(false);
-      setErr("Not signed in");
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("vendor_payouts")
-      .select("id,amount,created_at,reference")
-      .eq("vendor_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(10);
-
-    setPayoutsLoading(false);
-
-    if (error) {
-      setErr(error.message);
-      return;
-    }
-
-    setPayouts((data as PayoutRow[]) ?? []);
-  }
-
   const showLogo = profile?.logo_url || logoPreviewUrl;
 
-  function updateStoreDay(day: StoreDayKey, patch: Partial<StoreHours[StoreDayKey]>) {
-    setStoreHours((prev) => ({
+  function updateStoreDay(target: "live" | "draft", day: StoreDayKey, patch: Partial<StoreHours[StoreDayKey]>) {
+    const setter = target === "live" ? setStoreHours : setHoursDraft;
+    setter((prev) => ({
       ...prev,
       [day]: {
         ...prev[day],
@@ -508,6 +418,57 @@ export default function VendorAccountPage() {
       },
     }));
   }
+
+  async function saveAvailabilityPatch(patch: Partial<ProfileRow> & { store_hours_json?: StoreHours | null }) {
+    if (!profile) return;
+    setAvailabilitySaving(true);
+    setErr(null);
+    setOk(null);
+
+    const payload = {
+      is_store_open: patch.is_store_open ?? isStoreOpen,
+      store_closed_note: patch.store_closed_note ?? (clean(storeClosedNote) || null),
+      store_hours_json: patch.store_hours_json ?? storeHours,
+    };
+
+    const { error } = await supabase.from("profiles").update(payload).eq("id", profile.id);
+    setAvailabilitySaving(false);
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+
+    const nextProfile = { ...profile, ...payload };
+    setProfile(nextProfile);
+    setIsStoreOpen(nextProfile.is_store_open !== false);
+    setStoreClosedNote(nextProfile.store_closed_note ?? "");
+    setStoreHours(normalizeStoreHours(nextProfile.store_hours_json));
+    setHoursDraft(normalizeStoreHours(nextProfile.store_hours_json));
+    setOk("Restaurant availability updated.");
+  }
+
+  function openHoursModal() {
+    setHoursDraft(normalizeStoreHours(storeHours));
+    setHoursModalOpen(true);
+  }
+
+  function closeHoursModal() {
+    setHoursDraft(normalizeStoreHours(storeHours));
+    setHoursModalOpen(false);
+  }
+
+  async function saveHoursModal() {
+    await saveAvailabilityPatch({ store_hours_json: hoursDraft });
+    setHoursModalOpen(false);
+  }
+
+  const hoursSummary = hasCustomStoreHours
+    ? STORE_DAY_KEYS.map((day) => {
+        const row = storeHours[day];
+        if (!row.enabled || !row.open || !row.close) return `${dayLabel(day)}: Closed`;
+        return `${dayLabel(day)}: ${formatStoreTime(row.open)} - ${formatStoreTime(row.close)}`;
+      })
+    : [`Default: ${formatStoreTime(DEFAULT_OPEN_TIME)} - ${formatStoreTime(DEFAULT_CLOSE_TIME)} daily`];
 
   return (
     <div className="space-y-4">
@@ -709,21 +670,42 @@ export default function VendorAccountPage() {
 
               {!editing ? (
                 <div className="mt-4 space-y-3">
+                  <div className="rounded-2xl border p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">Accept orders now</p>
+                        <p className="mt-1 text-xs text-gray-500">Use this toggle to open or close your restaurant immediately.</p>
+                      </div>
+                      <button
+                        type="button"
+                        className={`rounded-full px-4 py-2 text-sm font-medium disabled:opacity-60 ${
+                          isStoreOpen ? "bg-emerald-600 text-white" : "bg-gray-200 text-gray-800"
+                        }`}
+                        onClick={() => saveAvailabilityPatch({ is_store_open: !isStoreOpen })}
+                        disabled={availabilitySaving}
+                      >
+                        {availabilitySaving ? "Saving..." : isStoreOpen ? "Open" : "Closed"}
+                      </button>
+                    </div>
+                  </div>
                   <div className="rounded-xl border bg-gray-50 p-3">
                     <p className="text-sm font-medium text-gray-900">{availability.detail}</p>
                   </div>
-                  <div className="grid gap-2">
-                    {STORE_DAY_KEYS.map((day) => {
-                      const row = storeHours[day];
-                      return (
-                        <div key={day} className="flex items-center justify-between rounded-xl border px-3 py-2 text-sm">
-                          <span>{dayLabel(day)}</span>
-                          <span className="text-gray-600">
-                            {row.enabled && row.open && row.close ? `${formatStoreTime(row.open)} - ${formatStoreTime(row.close)}` : "Closed"}
-                          </span>
-                        </div>
-                      );
-                    })}
+                  <div className="rounded-xl border px-3 py-3 text-sm text-gray-600">
+                    <p className="font-medium text-gray-900">Opening hours</p>
+                    <p className="mt-1 text-xs text-gray-500">If you do not set any hours, Dashbuy uses 7:00 AM to 10:00 PM daily.</p>
+                    <div className="mt-3 space-y-1">
+                      {hoursSummary.map((line) => (
+                        <p key={line}>{line}</p>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-3 rounded-xl border px-4 py-2 text-sm"
+                      onClick={openHoursModal}
+                    >
+                      Set opening and closing time
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -732,7 +714,9 @@ export default function VendorAccountPage() {
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-sm font-medium text-gray-900">Accept orders now</p>
-                        <p className="mt-1 text-xs text-gray-500">Turn this off if you want to close your restaurant immediately.</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Turn this off if you want to close your restaurant immediately.
+                        </p>
                       </div>
                       <button
                         type="button"
@@ -756,51 +740,22 @@ export default function VendorAccountPage() {
                       disabled={saving}
                     />
                   </div>
-
-                  <div className="space-y-3">
-                    <p className="text-sm font-medium text-gray-900">Weekly opening hours</p>
-                    <p className="text-xs text-gray-500">If no day is enabled, your restaurant will appear open until you manually close it.</p>
-                    {STORE_DAY_KEYS.map((day) => {
-                      const row = storeHours[day];
-                      return (
-                        <div key={day} className="rounded-2xl border p-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm font-medium">{dayLabel(day)}</p>
-                            <label className="flex items-center gap-2 text-xs text-gray-600">
-                              <input
-                                type="checkbox"
-                                checked={row.enabled}
-                                onChange={(e) => updateStoreDay(day, { enabled: e.target.checked })}
-                                disabled={saving}
-                              />
-                              Open this day
-                            </label>
-                          </div>
-                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                            <div>
-                              <label className="text-xs text-gray-600">Open</label>
-                              <input
-                                type="time"
-                                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
-                                value={row.open}
-                                onChange={(e) => updateStoreDay(day, { open: e.target.value })}
-                                disabled={saving || !row.enabled}
-                              />
-                            </div>
-                            <div>
-                              <label className="text-xs text-gray-600">Close</label>
-                              <input
-                                type="time"
-                                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
-                                value={row.close}
-                                onChange={(e) => updateStoreDay(day, { close: e.target.value })}
-                                disabled={saving || !row.enabled}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div className="rounded-2xl border bg-gray-50 p-4 text-sm text-gray-600">
+                    <p className="font-medium text-gray-900">Opening hours</p>
+                    <p className="mt-1 text-xs text-gray-500">If you leave this unset, Dashbuy uses 7:00 AM to 10:00 PM daily.</p>
+                    <div className="mt-3 space-y-1">
+                      {hoursSummary.map((line) => (
+                        <p key={line}>{line}</p>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-3 rounded-xl border bg-white px-4 py-2 text-sm"
+                      onClick={openHoursModal}
+                      disabled={saving}
+                    >
+                      Set opening and closing time
+                    </button>
                   </div>
                 </div>
               )}
@@ -886,6 +841,85 @@ export default function VendorAccountPage() {
           </div>
 
         </>
+      ) : null}
+
+      {hoursModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center" onClick={closeHoursModal}>
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-4 sm:p-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold">Set opening and closing time</p>
+                <p className="mt-1 text-sm text-gray-600">Choose daily hours. If you leave every day unset, Dashbuy uses 7:00 AM to 10:00 PM daily.</p>
+              </div>
+              <button type="button" className="rounded-xl border px-3 py-2 text-sm" onClick={closeHoursModal}>
+                Cancel
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {STORE_DAY_KEYS.map((day) => {
+                const row = hoursDraft[day];
+                return (
+                  <div key={day} className="rounded-2xl border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium">{dayLabel(day)}</p>
+                      <label className="flex items-center gap-2 text-xs text-gray-600">
+                        <input
+                          type="checkbox"
+                          checked={row.enabled}
+                          onChange={(e) => updateStoreDay("draft", day, { enabled: e.target.checked })}
+                          disabled={availabilitySaving}
+                        />
+                        Set this day
+                      </label>
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="text-xs text-gray-600">Open</label>
+                        <input
+                          type="time"
+                          className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                          value={row.open}
+                          onChange={(e) => updateStoreDay("draft", day, { open: e.target.value })}
+                          disabled={!row.enabled || availabilitySaving}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-600">Close</label>
+                        <input
+                          type="time"
+                          className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                          value={row.close}
+                          onChange={(e) => updateStoreDay("draft", day, { close: e.target.value })}
+                          disabled={!row.enabled || availabilitySaving}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                className="rounded-xl border px-4 py-3 text-sm sm:flex-1"
+                onClick={closeHoursModal}
+                disabled={availabilitySaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-black px-4 py-3 text-sm text-white sm:flex-1 disabled:opacity-60"
+                onClick={saveHoursModal}
+                disabled={availabilitySaving}
+              >
+                {availabilitySaving ? "Saving..." : "Save hours"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

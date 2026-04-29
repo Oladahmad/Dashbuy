@@ -734,16 +734,6 @@ export default function VendorFoodPage() {
                         aria-label={`Select ${it.name}`}
                       />
                     </label>
-                    <div className="h-14 w-14 rounded-xl bg-gray-100 overflow-hidden shrink-0">
-                      {it.image_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={it.image_url}
-                          alt={it.name}
-                          className="h-14 w-14 object-cover"
-                        />
-                      ) : null}
-                    </div>
 
                     <div className="min-w-0 flex-1">
                       <button
@@ -828,16 +818,6 @@ export default function VendorFoodPage() {
           >
             <div className="flex items-center justify-between p-4 border-b">
               <div className="min-w-0 flex items-center gap-3">
-                <div className="h-10 w-10 rounded-lg bg-gray-100 overflow-hidden shrink-0">
-                  {selectedItem.image_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={selectedItem.image_url}
-                      alt={selectedItem.name}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : null}
-                </div>
                 <div className="min-w-0">
                   <p className="text-xs text-gray-600">
                     {cap(selectedItem.food_type ?? "single")}
@@ -868,42 +848,6 @@ export default function VendorFoodPage() {
                 {editOpen ? (
                     <div className="mt-3">
                       <div className="grid gap-2">
-                      <div className="rounded-xl border p-3">
-                        <p className="text-xs text-gray-600">Thumbnail</p>
-                        <div className="mt-2 flex items-center gap-3">
-                          <div className="relative h-16 w-16 rounded-lg bg-gray-100 overflow-hidden shrink-0">
-                            {selectedItem.image_url ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={selectedItem.image_url}
-                                alt={selectedItem.name}
-                                className="h-full w-full object-cover"
-                              />
-                            ) : null}
-                          </div>
-
-                          <div className="flex-1">
-                            <label
-                              htmlFor="edit-food-photo"
-                              className="inline-flex rounded-lg border px-3 py-1 text-sm cursor-pointer"
-                            >
-                              Edit photo
-                            </label>
-                            <input
-                              id="edit-food-photo"
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => setEditImageFile(e.target.files?.[0] ?? null)}
-                              disabled={itemSaving || itemDeleting}
-                            />
-                            {editImageFile ? (
-                              <p className="mt-1 text-xs text-gray-600 truncate">{editImageFile.name}</p>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-
                       <input
                         className="rounded-xl border px-3 py-2 text-sm"
                         placeholder="Food name"

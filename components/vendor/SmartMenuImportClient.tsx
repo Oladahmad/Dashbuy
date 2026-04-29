@@ -39,16 +39,6 @@ function mergeDuplicateItems(draft: MenuImportDraft) {
   return clone;
 }
 
-function fileExt(name: string) {
-  const index = name.lastIndexOf(".");
-  if (index < 0) return "jpg";
-  return name.slice(index + 1).toLowerCase();
-}
-
-function nowId() {
-  return Math.random().toString(16).slice(2) + Date.now().toString(16);
-}
-
 function regroupCategories(draft: MenuImportDraft): MenuImportDraft {
   const grouped = new Map<string, MenuImportDraft["categories"][number]>();
 
@@ -56,7 +46,7 @@ function regroupCategories(draft: MenuImportDraft): MenuImportDraft {
     for (const item of category.items) {
       const key = item.categoryName.trim().toLowerCase() || category.name.trim().toLowerCase() || category.id;
       const existing = grouped.get(key) ?? {
-        id: category.id,
+        id: key || `${category.id}-${grouped.size}`,
         name: item.categoryName.trim() || category.name,
         inferred: category.inferred,
         items: [],
@@ -79,6 +69,12 @@ const nairaFormatter = new Intl.NumberFormat("en-NG", {
   maximumFractionDigits: 0,
 });
 
+const VARIANT_LABELS: Record<number, string[]> = {
+  2: ["Small", "Big"],
+  3: ["Small", "Medium", "Big"],
+  4: ["Small", "Medium", "Big", "Jumbo"],
+};
+
 function formatPrice(value: number | null) {
   if (!value || value <= 0) return "Needs price";
   return nairaFormatter.format(value);
@@ -96,14 +92,22 @@ function isDuplicateVariantLabel(name: string, size: string | null) {
   return name.trim().toLowerCase() === size.trim().toLowerCase();
 }
 
-function getReviewCount(draft: MenuImportDraft | null) {
-  if (!draft) return 0;
-  return flattenItems(draft).filter(({ item }) => item.lowConfidence || (!item.imageUrl && item.imageSource === "none")).length;
+function isProteinItem(item: MenuImportItemDraft) {
+  return item.platformCategory === "protein" || item.categoryName.trim().toLowerCase() === "protein";
 }
 
-function getImportantWarnings(draft: MenuImportDraft | null) {
-  if (!draft) return [];
-  return draft.warnings.filter((warning) => warning.severity === "high");
+function buildVariantPreset(count: number) {
+  return (VARIANT_LABELS[count] ?? []).map((label, index) => ({
+    id: `variant_${crypto.randomUUID()}`,
+    name: label,
+    size: label,
+    price: 0,
+    notes: index === 0 ? "Add price" : null,
+  }));
+}
+
+function isNoVariantPreset(value: string) {
+  return value === "none";
 }
 
 export default function SmartMenuImportClient() {
@@ -117,11 +121,8 @@ export default function SmartMenuImportClient() {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishState, setPublishState] = useState<"idle" | "publishing" | "published">("idle");
-  const [uploadingImageFor, setUploadingImageFor] = useState<string | null>(null);
-
+  const [variantPresetCount, setVariantPresetCount] = useState<Record<string, string>>({});
   const totalItems = useMemo(() => (draft ? flattenItems(draft).length : 0), [draft]);
-  const reviewCount = useMemo(() => getReviewCount(draft), [draft]);
-  const importantWarnings = useMemo(() => getImportantWarnings(draft), [draft]);
 
   async function getAccessToken() {
     const { data: sessionData } = await supabase.auth.getSession();
@@ -170,13 +171,10 @@ export default function SmartMenuImportClient() {
             setDraft(body.draft);
             setSessionId(body.sessionId);
             const extractedCount = flattenItems(body.draft).length;
-            const nextWarnings = getImportantWarnings(body.draft);
-          if (extractedCount === 0 && nextWarnings.length > 0) {
-            setMessage(nextWarnings[0]?.message ?? "Menu import could not extract any items.");
-          } else if (extractedCount === 0) {
+            if (extractedCount === 0) {
             setMessage("Menu import finished, but no menu items were extracted.");
           } else {
-            setMessage("Menu extracted. Review everything below before publishing.");
+            setMessage("Starter menu loaded. Fill prices, add protein variants if needed, then publish.");
           }
           } else {
             setMessage(xhr.status === 401 ? "Your session expired. Please sign in again and retry." : body.error ?? "Menu import failed.");
@@ -225,45 +223,30 @@ export default function SmartMenuImportClient() {
     });
   }
 
-  async function uploadItemImage(itemId: string, file: File) {
-    setUploadingImageFor(itemId);
-    setMessage(null);
-
-    const { data: auth } = await supabase.auth.getUser();
-    const vendorId = auth.user?.id;
-    if (!vendorId) {
-      setUploadingImageFor(null);
-      setMessage("Please sign in again before adding images.");
+  function applyProteinVariantPreset(itemId: string, preset: string) {
+    if (isNoVariantPreset(preset)) {
+      removeProteinVariants(itemId);
       return;
     }
 
-    const ext = fileExt(file.name);
-    const path = `vendors/${vendorId}/foods/import-${nowId()}.${ext}`;
-    const upload = await supabase.storage.from("food-images").upload(path, file, {
-      upsert: true,
-      contentType: file.type || "image/jpeg",
-    });
-
-    if (upload.error) {
-      setUploadingImageFor(null);
-      setMessage("Could not upload image: " + upload.error.message);
-      return;
-    }
-
-    const publicUrl = supabase.storage.from("food-images").getPublicUrl(path).data.publicUrl;
-    if (!publicUrl) {
-      setUploadingImageFor(null);
-      setMessage("Image uploaded but the public URL could not be created.");
-      return;
-    }
-
+    const count = Number(preset);
     updateItem(itemId, (current) => ({
       ...current,
-      imageUrl: publicUrl,
-      imageSource: "none",
+      pricingType: "variant",
+      price: null,
+      unitLabel: null,
+      variants: buildVariantPreset(count),
     }));
-    setUploadingImageFor(null);
-    setMessage("Image added.");
+  }
+
+  function removeProteinVariants(itemId: string) {
+    updateItem(itemId, (current) => ({
+      ...current,
+      pricingType: "fixed",
+      price: null,
+      unitLabel: null,
+      variants: [],
+    }));
   }
 
   async function saveReview() {
@@ -335,7 +318,7 @@ export default function SmartMenuImportClient() {
         <p className="text-sm text-gray-600">Import Menu with AI</p>
         <h1 className="mt-1 text-xl font-semibold">Upload a menu sheet, scan, PDF, or food photo</h1>
         <p className="mt-2 text-sm text-gray-600">
-          Supported formats: JPG, PNG, WEBP, PDF, and DOCX. Dashbuy will extract categories, prices, variants, combos, and images for review.
+          Supported formats: JPG, PNG, WEBP, PDF, and DOCX. Dashbuy will load your starter menu with blank prices so you can finish setup quickly.
         </p>
 
         <label
@@ -407,18 +390,13 @@ export default function SmartMenuImportClient() {
           <div className="rounded-3xl border bg-white p-5">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-sm text-gray-600">Human review</p>
-                <p className="text-lg font-semibold">{totalItems} extracted menu item{totalItems === 1 ? "" : "s"}</p>
-                <p className="mt-1 text-sm text-gray-500">{draft.sourceSummary}</p>
+                <p className="text-sm text-gray-600">Menu setup</p>
+                <p className="text-lg font-semibold">{totalItems} menu item{totalItems === 1 ? "" : "s"}</p>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-sm sm:flex sm:flex-wrap">
+              <div className="grid grid-cols-1 gap-2 text-sm sm:flex sm:flex-wrap">
                 <div className="rounded-2xl bg-gray-50 px-3 py-2 text-center">
                   <p className="text-xs text-gray-500">Categories</p>
                   <p className="font-semibold text-gray-900">{draft.categories.length}</p>
-                </div>
-                <div className="rounded-2xl bg-gray-50 px-3 py-2 text-center">
-                  <p className="text-xs text-gray-500">Check items</p>
-                  <p className="font-semibold text-gray-900">{reviewCount}</p>
                 </div>
               </div>
             </div>
@@ -441,66 +419,22 @@ export default function SmartMenuImportClient() {
             </div>
           </div>
 
-          {importantWarnings.length > 0 ? (
-            <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4">
-              <p className="text-sm font-semibold text-amber-950">Review notes</p>
-              <div className="mt-3 space-y-2">
-                {importantWarnings.map((warning, index) => (
-                  <p key={`${warning.code}-${index}`} className="text-sm text-amber-900">
-                    {warning.message}
-                  </p>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
           <div className="space-y-5">
-            {draft.categories.map((category) => (
-              <section key={category.id} className="rounded-3xl border bg-white p-4 sm:p-5">
+            {draft.categories.map((category, index) => (
+              <section key={`${category.id}-${category.name}-${index}`} className="rounded-3xl border bg-white p-4 sm:p-5">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="font-semibold">{category.name}</p>
-                    <p className="text-xs text-gray-600">{category.inferred ? "Suggested category" : "Detected from source"}</p>
                   </div>
                   <p className="text-sm text-gray-500">{category.items.length} item{category.items.length === 1 ? "" : "s"}</p>
                 </div>
 
                 <div className="mt-4 space-y-3">
                   {category.items.map((item) => (
-                    <div key={item.id} className="rounded-3xl border bg-gray-50 p-4">
-                      <div className="grid gap-4 lg:grid-cols-[112px_1fr]">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-3">
-                            <div className="h-20 w-20 overflow-hidden rounded-2xl bg-white ring-1 ring-gray-200">
-                              {item.imageUrl ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={item.imageUrl} alt={item.name} className="h-full w-full object-cover" />
-                              ) : (
-                                <div className="flex h-full items-center justify-center text-[11px] text-gray-400">No image</div>
-                              )}
-                            </div>
-                            <label className="inline-flex cursor-pointer items-center rounded-xl border bg-white px-3 py-2 text-sm font-medium text-gray-700">
-                              <input
-                                type="file"
-                                accept="image/*"
-                                className="hidden"
-                                onChange={(event) => {
-                                  const file = event.target.files?.[0] ?? null;
-                                  if (file) void uploadItemImage(item.id, file);
-                                  event.currentTarget.value = "";
-                                }}
-                                disabled={uploadingImageFor === item.id}
-                              />
-                              {uploadingImageFor === item.id ? "Uploading..." : item.imageUrl ? "Change image" : "Add image"}
-                            </label>
-                          </div>
-                        </div>
-
+                      <div key={item.id} className="rounded-3xl border bg-gray-50 p-4">
                         <div className="grid gap-3">
                           <div className="flex flex-wrap gap-2">
                             <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-700">{getPricingSummary(item)}</span>
-                            {item.lowConfidence ? <span className="rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-900">Check OCR</span> : null}
-                            {!item.imageUrl ? <span className="rounded-full bg-gray-200 px-3 py-1 text-xs text-gray-700">No image</span> : null}
                           </div>
 
                           <div className="grid grid-cols-2 gap-2">
@@ -519,7 +453,7 @@ export default function SmartMenuImportClient() {
                           </div>
 
                           <div className="grid grid-cols-2 gap-2">
-                            {item.pricingType !== "variant" ? (
+                            {item.pricingType !== "variant" && item.platformCategory !== "soup" ? (
                               <input
                                 className="min-w-0 rounded-xl border bg-white px-3 py-2 text-sm"
                                 inputMode="numeric"
@@ -532,6 +466,8 @@ export default function SmartMenuImportClient() {
                                 }
                                 placeholder="Price"
                               />
+                            ) : item.platformCategory === "soup" ? (
+                              <div className="min-w-0 rounded-xl bg-white px-3 py-2 text-sm text-gray-400">No price needed</div>
                             ) : (
                               <div className="min-w-0 rounded-xl bg-white px-3 py-2 text-sm text-gray-500">Price comes from variants</div>
                             )}
@@ -550,6 +486,45 @@ export default function SmartMenuImportClient() {
                               </div>
                             )}
                           </div>
+
+                          {isProteinItem(item) ? (
+                            <div className="rounded-2xl border bg-white p-3">
+                              <p className="text-xs font-medium text-gray-600">Protein variants</p>
+                              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                                <select
+                                  className="rounded-xl border px-3 py-2 text-sm"
+                                  value={variantPresetCount[item.id] ?? "2"}
+                                  onChange={(event) =>
+                                    setVariantPresetCount((current) => ({
+                                      ...current,
+                                      [item.id]: event.target.value,
+                                    }))
+                                  }
+                                >
+                                  <option value={2}>2 variants: Small / Big</option>
+                                  <option value={3}>3 variants: Small / Medium / Big</option>
+                                  <option value={4}>4 variants: Small / Medium / Big / Jumbo</option>
+                                  <option value="none">No variant</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  className="rounded-xl border px-3 py-2 text-sm"
+                                  onClick={() => applyProteinVariantPreset(item.id, variantPresetCount[item.id] ?? "2")}
+                                >
+                                  {(variantPresetCount[item.id] ?? "2") === "none" ? "Clear variants" : "Add variants"}
+                                </button>
+                                {item.variants.length > 0 ? (
+                                  <button
+                                    type="button"
+                                    className="rounded-xl border px-3 py-2 text-sm text-red-700"
+                                    onClick={() => removeProteinVariants(item.id)}
+                                  >
+                                    Remove variants
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
 
                           {item.variants.length > 0 ? (
                             <div className="rounded-2xl border bg-white p-3">
@@ -605,8 +580,7 @@ export default function SmartMenuImportClient() {
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               </section>
             ))}

@@ -10,9 +10,22 @@ type BeforeInstallPromptEvent = Event & {
 };
 
 export default function InstallPage() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installed, setInstalled] = useState(false);
-  const [hint, setHint] = useState("");
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(() =>
+    typeof window === "undefined" ? null : window.__dashbuyDeferredPrompt ?? null
+  );
+  const [installed, setInstalled] = useState(() =>
+    typeof window === "undefined" ? false : window.matchMedia("(display-mode: standalone)").matches
+  );
+  const [hint, setHint] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches
+      ? "Dashbuy is already installed on this phone."
+      : ""
+  );
+
+  const isStandalone = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(display-mode: standalone)").matches;
+  }, []);
 
   const isIos = useMemo(() => {
     if (typeof navigator === "undefined") return false;
@@ -20,30 +33,45 @@ export default function InstallPage() {
     return /iphone|ipad|ipod/.test(ua);
   }, []);
 
+  const isAndroid = useMemo(() => {
+    if (typeof navigator === "undefined") return false;
+    return /android/i.test(navigator.userAgent);
+  }, []);
+
+  const isChromeLike = useMemo(() => {
+    if (typeof navigator === "undefined") return false;
+    const ua = navigator.userAgent;
+    return /Chrome|CriOS/i.test(ua) && !/EdgA|OPR|SamsungBrowser/i.test(ua);
+  }, []);
+
   useEffect(() => {
-    const onBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setDeferredPrompt(event as BeforeInstallPromptEvent);
+    const onPromptAvailable = () => {
+      setDeferredPrompt(window.__dashbuyDeferredPrompt ?? null);
     };
 
     const onInstalled = () => {
       setInstalled(true);
       setDeferredPrompt(null);
+      window.__dashbuyDeferredPrompt = null;
       setHint("Dashbuy installed successfully.");
     };
 
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    window.addEventListener("dashbuy:pwa-prompt-available", onPromptAvailable);
+    window.addEventListener("dashbuy:pwa-installed", onInstalled);
     window.addEventListener("appinstalled", onInstalled);
     return () => {
-      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("dashbuy:pwa-prompt-available", onPromptAvailable);
+      window.removeEventListener("dashbuy:pwa-installed", onInstalled);
       window.removeEventListener("appinstalled", onInstalled);
     };
-  }, []);
+  }, [isStandalone]);
 
   async function handleInstallNow() {
     if (deferredPrompt) {
       await deferredPrompt.prompt();
       const choice = await deferredPrompt.userChoice;
+      window.__dashbuyDeferredPrompt = null;
+      setDeferredPrompt(null);
       setHint(choice.outcome === "accepted" ? "Installing Dashbuy..." : "Install was dismissed.");
       return;
     }
@@ -51,7 +79,15 @@ export default function InstallPage() {
       setHint("On iPhone: tap Share, then Add to Home Screen.");
       return;
     }
-    setHint("Install option is in your browser menu if prompt is not showing.");
+    if (isAndroid && !isChromeLike) {
+      setHint("Open Dashbuy in Chrome on Android, then try Install app or Add to Home screen from the browser menu.");
+      return;
+    }
+    if (isAndroid) {
+      setHint("If Install app is missing, update Chrome, browse Dashbuy for a short while, then open the 3-dot menu and look for Add to Home screen.");
+      return;
+    }
+    setHint("Use a supported secure browser. On Android, Chrome works best. On iPhone, use Safari.");
   }
 
   return (
@@ -90,9 +126,20 @@ export default function InstallPage() {
           <h2 className="text-base font-semibold">Android (Chrome)</h2>
           <div className="mt-3 grid gap-2 text-sm text-gray-700">
             <p>1. Open Dashbuy in Chrome browser.</p>
-            <p>2. Tap the browser menu (top-right).</p>
-            <p>3. Tap Install app or Add to Home screen.</p>
-            <p>4. Confirm by tapping Install.</p>
+            <p>2. Stay on the site for a few seconds and browse one or two pages.</p>
+            <p>3. Tap the browser menu (top-right).</p>
+            <p>4. Tap Install app or Add to Home screen.</p>
+            <p>5. If nothing shows, update Chrome or try removing Lite mode/Data saver on older phones.</p>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border bg-white p-5">
+          <h2 className="text-base font-semibold">If Android still does not show install</h2>
+          <div className="mt-3 grid gap-2 text-sm text-gray-700">
+            <p>1. Make sure the site opens with `https://` and not inside Facebook, Instagram, or another in-app browser.</p>
+            <p>2. Open the link directly in Chrome, not Opera Mini, UC Browser, or a social media browser tab.</p>
+            <p>3. Update Chrome from Play Store if the phone supports updates.</p>
+            <p>4. If the phone is very old, use Add to Home screen as fallback even when the full app-style install prompt does not appear.</p>
           </div>
         </section>
 
@@ -109,4 +156,3 @@ export default function InstallPage() {
     </AppShell>
   );
 }
-

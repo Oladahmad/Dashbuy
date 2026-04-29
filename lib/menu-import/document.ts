@@ -11,10 +11,11 @@ import type { IngestedMenuUpload, SourcePageImage, UploadKind } from "./types";
 async function preprocessImageBuffer(buffer: Buffer) {
   return sharp(buffer)
     .rotate()
-    .resize({ width: 2000, withoutEnlargement: true })
+    .resize({ width: 2400, withoutEnlargement: true, fit: "inside" })
     .grayscale()
     .normalise()
-    .sharpen({ sigma: 1.1 })
+    .linear(1.18, -10)
+    .sharpen({ sigma: 1.5, m1: 1.2, m2: 2, x1: 2, y2: 10, y3: 20 })
     .median(1)
     .png({ compressionLevel: 8 })
     .toBuffer();
@@ -59,7 +60,7 @@ export async function ingestMenuUpload(file: File): Promise<IngestedMenuUpload> 
           buffer: processed,
         },
       ],
-      processingNotes: ["Image auto-oriented, denoised, normalized, and sharpened for OCR."],
+      processingNotes: ["Image auto-oriented, contrast-boosted, denoised, normalized, and sharpened for OCR."],
     };
   }
 
@@ -83,10 +84,10 @@ export async function ingestMenuUpload(file: File): Promise<IngestedMenuUpload> 
   try {
     await writeFile(pdfPath, buffer);
     const convert = fromPath(pdfPath, {
-      density: 180,
+      density: 220,
       format: "png",
-      width: 1600,
-      height: 2200,
+      width: 2000,
+      height: 2800,
       savePath: tempDir,
       saveFilename: "menu-page",
     });
@@ -116,7 +117,7 @@ export async function ingestMenuUpload(file: File): Promise<IngestedMenuUpload> 
       processingNotes: [
         `PDF text extracted from ${parsed.numpages || pageImages.length || 1} page(s).`,
         (parsed.numpages || 0) > MENU_IMPORT_MAX_PAGES ? `Only the first ${MENU_IMPORT_MAX_PAGES} page(s) were processed for OCR.` : "",
-        pageImages.length > 0 ? "PDF pages converted to images for multimodal OCR." : "PDF page conversion returned no images.",
+        pageImages.length > 0 ? "PDF pages converted at higher density and sharpened for multimodal OCR." : "PDF page conversion returned no images.",
       ].filter(Boolean),
     };
   } finally {

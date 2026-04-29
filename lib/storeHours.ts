@@ -21,6 +21,8 @@ export type StoreAvailability = {
 };
 
 const DAY_KEYS: StoreDayKey[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+export const DEFAULT_OPEN_TIME = "07:00";
+export const DEFAULT_CLOSE_TIME = "22:00";
 
 export function emptyStoreHours(): StoreHours {
   return {
@@ -121,6 +123,8 @@ export function evaluateStoreAvailability(input: StoreAvailabilityInput): StoreA
   const isStoreOpen = input.isStoreOpen !== false;
   const closedNote = String(input.closedNote ?? "").trim();
   const hours = normalizeStoreHours(input.storeHours);
+  const openMinutes = parseMinutes(DEFAULT_OPEN_TIME) ?? 7 * 60;
+  const closeMinutes = parseMinutes(DEFAULT_CLOSE_TIME) ?? 22 * 60;
 
   if (!isStoreOpen) {
     return {
@@ -130,54 +134,74 @@ export function evaluateStoreAvailability(input: StoreAvailabilityInput): StoreA
     };
   }
 
-  if (!hasEnabledSchedule(hours)) {
-    return {
-      isOpen: true,
-      statusLabel: "Open now",
-      detail: "Restaurant hours are not set yet.",
-    };
-  }
-
   const now = lagosNow();
-  const today = hours[now.dayKey];
-  const yesterday = hours[previousDayKey(now.dayKey)];
 
-  if (isDayOpen(today, now.minutes)) {
-    return {
-      isOpen: true,
-      statusLabel: "Open now",
-      detail: today.open && today.close ? `${formatStoreTime(today.open)} - ${formatStoreTime(today.close)}` : "Accepting orders now.",
-    };
-  }
+  if (hasEnabledSchedule(hours)) {
+    const today = hours[now.dayKey];
+    const yesterday = hours[previousDayKey(now.dayKey)];
 
-  const yesterdayOpen = parseMinutes(yesterday.open);
-  const yesterdayClose = parseMinutes(yesterday.close);
-  if (
-    yesterday.enabled &&
-    yesterdayOpen != null &&
-    yesterdayClose != null &&
-    yesterdayOpen > yesterdayClose &&
-    now.minutes < yesterdayClose
-  ) {
-    return {
-      isOpen: true,
-      statusLabel: "Open now",
-      detail: `${formatStoreTime(yesterday.open)} - ${formatStoreTime(yesterday.close)}`,
-    };
-  }
+    if (isDayOpen(today, now.minutes)) {
+      return {
+        isOpen: true,
+        statusLabel: "Open now",
+        detail: `${dayLabel(now.dayKey)}: ${formatStoreTime(today.open)} - ${formatStoreTime(today.close)}`,
+      };
+    }
 
-  if (today.enabled && parseMinutes(today.open) != null && parseMinutes(today.close) != null && now.minutes < (parseMinutes(today.open) ?? 0)) {
+    const yesterdayOpen = parseMinutes(yesterday.open);
+    const yesterdayClose = parseMinutes(yesterday.close);
+    if (
+      yesterday.enabled &&
+      yesterdayOpen != null &&
+      yesterdayClose != null &&
+      yesterdayOpen > yesterdayClose &&
+      now.minutes < yesterdayClose
+    ) {
+      return {
+        isOpen: true,
+        statusLabel: "Open now",
+        detail: `${dayLabel(previousDayKey(now.dayKey))}: ${formatStoreTime(yesterday.open)} - ${formatStoreTime(yesterday.close)}`,
+      };
+    }
+
+    const todayOpen = parseMinutes(today.open);
+    if (today.enabled && todayOpen != null && now.minutes < todayOpen) {
+      return {
+        isOpen: false,
+        statusLabel: `Opens ${formatStoreTime(today.open)}`,
+        detail: `${dayLabel(now.dayKey)}: ${formatStoreTime(today.open)} - ${formatStoreTime(today.close)}`,
+      };
+    }
+
     return {
       isOpen: false,
-      statusLabel: `Opens ${formatStoreTime(today.open)}`,
-      detail: `${formatStoreTime(today.open)} - ${formatStoreTime(today.close)}`,
+      statusLabel: "Closed now",
+      detail: closedNote || "Your custom daily schedule is currently closed.",
+    };
+  }
+
+  const withinDefaultWindow = now.minutes >= openMinutes && now.minutes < closeMinutes;
+
+  if (withinDefaultWindow) {
+    return {
+      isOpen: true,
+      statusLabel: "Open now",
+      detail: `Open daily from ${formatStoreTime(DEFAULT_OPEN_TIME)} to ${formatStoreTime(DEFAULT_CLOSE_TIME)}.`,
+    };
+  }
+
+  if (now.minutes < openMinutes) {
+    return {
+      isOpen: false,
+      statusLabel: `Opens ${formatStoreTime(DEFAULT_OPEN_TIME)}`,
+      detail: `Restaurants accept orders daily from ${formatStoreTime(DEFAULT_OPEN_TIME)} to ${formatStoreTime(DEFAULT_CLOSE_TIME)}.`,
     };
   }
 
   return {
     isOpen: false,
     statusLabel: "Closed now",
-    detail: closedNote || "This restaurant is currently closed.",
+    detail: closedNote || `Restaurants stop accepting orders after ${formatStoreTime(DEFAULT_CLOSE_TIME)}.`,
   };
 }
 

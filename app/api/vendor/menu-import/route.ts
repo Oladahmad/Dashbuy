@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { ingestMenuUpload } from "@/lib/menu-import/document";
-import { enrichDraftWithImages } from "@/lib/menu-import/images";
 import { buildMenuDraft } from "@/lib/menu-import/parser";
 import { requireVendorActor } from "@/lib/menu-import/server-auth";
 import { uploadImportSource } from "@/lib/menu-import/storage";
@@ -27,7 +26,6 @@ export async function POST(req: Request) {
       buffer: sourceBuffer,
     });
     const draft = await buildMenuDraft(ingested);
-    await enrichDraftWithImages(draft, actor.userId);
 
     const { data, error } = await supabaseAdmin
       .from("menu_import_sessions")

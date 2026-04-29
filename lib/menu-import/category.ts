@@ -4,10 +4,11 @@ import { cleanText } from "./utils";
 const CUSTOM_CATEGORY_LABELS: Array<{ match: string[]; label: string; platformCategory: PlatformFoodCategory }> = [
   { match: ["jollof", "fried rice", "white rice", "native rice", "rice"], label: "Rice Dishes", platformCategory: "main" },
   { match: ["beans"], label: "Rice Dishes", platformCategory: "main" },
+  { match: ["burger", "burgers"], label: "Burger", platformCategory: "main" },
   { match: ["spaghetti", "pasta", "noodles"], label: "Pasta", platformCategory: "main" },
   { match: ["amala", "semo", "eba", "fufu", "pounded yam", "tuwo"], label: "Swallow", platformCategory: "swallow" },
   { match: ["egusi", "ewedu", "ogbono", "okra", "afang", "nsala", "stew", "soup", "eforiro", "efo riro", "gbegiri", "pepper soup"], label: "Soups", platformCategory: "soup" },
-  { match: ["chicken", "turkey", "beef", "fish", "goat", "ponmo", "snail", "gizzard", "titus", "assorted", "egg"], label: "Proteins", platformCategory: "protein" },
+  { match: ["chicken", "turkey", "beef", "fish", "goat", "ponmo", "snail", "gizzard", "titus", "assorted", "egg"], label: "Protein", platformCategory: "protein" },
   { match: ["zobo", "malt", "fanta", "coke", "juice", "water", "drink"], label: "Drinks", platformCategory: "drink" },
   { match: ["plantain", "salad", "fries", "chips", "moi moi", "moimoi"], label: "Sides", platformCategory: "side" },
   { match: ["sauce", "addon", "add on", "extra"], label: "Extras", platformCategory: "extra" },
@@ -29,6 +30,13 @@ function findMatchedCategory(value: string): { label: string; platformCategory: 
 }
 
 function canonicalizeRawCategory(rawCategory: string) {
+  const normalized = cleanText(rawCategory).toLowerCase();
+  if (normalized === "chicken") {
+    return {
+      categoryName: "Chicken",
+      platformCategory: "protein" as const,
+    };
+  }
   const matched = findMatchedCategory(rawCategory);
   if (!matched) return null;
   return {
@@ -53,15 +61,6 @@ export function inferDisplayCategory(platformCategory: PlatformFoodCategory) {
 
 export function inferBestCategory(name: string, rawCategory: string) {
   const normalizedCategory = cleanText(rawCategory);
-  const nameMatch = findMatchedCategory(name);
-  if (nameMatch) {
-    return {
-      categoryName: nameMatch.label,
-      platformCategory: nameMatch.platformCategory,
-      inferred: !normalizedCategory || cleanText(nameMatch.label).toLowerCase() !== normalizedCategory.toLowerCase(),
-    };
-  }
-
   if (normalizedCategory) {
     const canonicalCategory = canonicalizeRawCategory(normalizedCategory);
     return {
@@ -71,11 +70,11 @@ export function inferBestCategory(name: string, rawCategory: string) {
     };
   }
 
-  const matched = findMatchedCategory(name);
-  if (matched) {
+  const nameMatch = findMatchedCategory(name);
+  if (nameMatch) {
     return {
-      categoryName: matched.label,
-      platformCategory: matched.platformCategory,
+      categoryName: nameMatch.label,
+      platformCategory: nameMatch.platformCategory,
       inferred: true,
     };
   }

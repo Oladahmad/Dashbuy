@@ -17,8 +17,11 @@ function getGroqVisionClient() {
 function buildVisionPrompt(pageNumber: number, totalPages: number) {
   return [
     `You are reading page ${pageNumber} of ${totalPages} from a Nigerian restaurant menu.`,
-    "Extract the visible menu text as clean plain text.",
-    "Preserve the reading order, menu headings, item names, and prices.",
+    "Extract the visible menu text as clean plain text for OCR recovery.",
+    "Preserve menu headings, column sections, item names, bullet points, and every visible price.",
+    "Keep one menu item per line whenever possible, especially for price lists.",
+    "If a section contains item names without prices, still output each item on its own line.",
+    "Do not merge neighboring columns into one sentence.",
     "Do not summarize, explain, or add missing details.",
     "If a line is unclear, return your best reading instead of skipping it.",
     "Output only the extracted text.",

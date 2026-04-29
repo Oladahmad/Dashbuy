@@ -12,7 +12,7 @@ export const MENU_IMPORT_SUPPORTED_MIME_TYPES = new Map<string, "image" | "pdf" 
 export const PLATFORM_CATEGORY_LABELS = {
   main: "Main",
   side: "Sides",
-  protein: "Proteins",
+  protein: "Protein",
   swallow: "Swallow",
   soup: "Soups",
   drink: "Drinks",

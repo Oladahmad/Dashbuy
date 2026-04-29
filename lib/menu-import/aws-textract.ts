@@ -30,6 +30,13 @@ function getTextractClient() {
   return textractClient;
 }
 
+function sortByReadingOrder<T extends { top: number; left: number }>(entries: T[]) {
+  return [...entries].sort((a, b) => {
+    if (Math.abs(a.top - b.top) > 0.012) return a.top - b.top;
+    return a.left - b.left;
+  });
+}
+
 export async function extractMenuTextWithAwsTextract(upload: IngestedMenuUpload) {
   if (upload.pageImages.length === 0) return "";
 
@@ -46,12 +53,44 @@ export async function extractMenuTextWithAwsTextract(upload: IngestedMenuUpload)
         })
       );
 
-      const lines = (response.Blocks ?? [])
-        .filter((block) => block.BlockType === "LINE" && block.Text)
-        .map((block) => block.Text!.trim())
+      const blocks = response.Blocks ?? [];
+
+      const lines = sortByReadingOrder(
+        blocks
+          .filter((block) => block.BlockType === "LINE" && block.Text)
+          .map((block) => ({
+            text: block.Text!.trim(),
+            top: block.Geometry?.BoundingBox?.Top ?? 0,
+            left: block.Geometry?.BoundingBox?.Left ?? 0,
+          }))
+      )
+        .map((block) => block.text)
         .filter(Boolean);
 
-      return cleanText(lines.join("\n"));
+      const words = sortByReadingOrder(
+        blocks
+          .filter((block) => block.BlockType === "WORD" && block.Text)
+          .map((block) => ({
+            text: block.Text!.trim(),
+            top: block.Geometry?.BoundingBox?.Top ?? 0,
+            left: block.Geometry?.BoundingBox?.Left ?? 0,
+          }))
+      );
+
+      const reconstructedRows: string[] = [];
+      let activeRow: { top: number; words: string[] } | null = null;
+      for (const word of words) {
+        if (!word.text) continue;
+        if (!activeRow || Math.abs(activeRow.top - word.top) > 0.012) {
+          if (activeRow?.words.length) reconstructedRows.push(activeRow.words.join(" "));
+          activeRow = { top: word.top, words: [word.text] };
+          continue;
+        }
+        activeRow.words.push(word.text);
+      }
+      if (activeRow?.words.length) reconstructedRows.push(activeRow.words.join(" "));
+
+      return cleanText([...lines, ...reconstructedRows].filter(Boolean).join("\n"));
     })
   );
 
