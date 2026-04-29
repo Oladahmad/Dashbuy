@@ -39,6 +39,16 @@ function mergeDuplicateItems(draft: MenuImportDraft) {
   return clone;
 }
 
+function fileExt(name: string) {
+  const index = name.lastIndexOf(".");
+  if (index < 0) return "jpg";
+  return name.slice(index + 1).toLowerCase();
+}
+
+function nowId() {
+  return Math.random().toString(16).slice(2) + Date.now().toString(16);
+}
+
 function regroupCategories(draft: MenuImportDraft): MenuImportDraft {
   const grouped = new Map<string, MenuImportDraft["categories"][number]>();
 
@@ -63,6 +73,39 @@ function regroupCategories(draft: MenuImportDraft): MenuImportDraft {
   };
 }
 
+const nairaFormatter = new Intl.NumberFormat("en-NG", {
+  style: "currency",
+  currency: "NGN",
+  maximumFractionDigits: 0,
+});
+
+function formatPrice(value: number | null) {
+  if (!value || value <= 0) return "Needs price";
+  return nairaFormatter.format(value);
+}
+
+function getPricingSummary(item: MenuImportItemDraft) {
+  if (item.pricingType === "variant") return `${item.variants.length} variant${item.variants.length === 1 ? "" : "s"}`;
+  if (item.pricingType === "per_scoop") return `${formatPrice(item.price)} per scoop`;
+  if (item.pricingType === "per_unit") return `${formatPrice(item.price)} per ${item.unitLabel?.trim() || "unit"}`;
+  return formatPrice(item.price);
+}
+
+function isDuplicateVariantLabel(name: string, size: string | null) {
+  if (!size) return false;
+  return name.trim().toLowerCase() === size.trim().toLowerCase();
+}
+
+function getReviewCount(draft: MenuImportDraft | null) {
+  if (!draft) return 0;
+  return flattenItems(draft).filter(({ item }) => item.lowConfidence || (!item.imageUrl && item.imageSource === "none")).length;
+}
+
+function getImportantWarnings(draft: MenuImportDraft | null) {
+  if (!draft) return [];
+  return draft.warnings.filter((warning) => warning.severity === "high");
+}
+
 export default function SmartMenuImportClient() {
   const router = useRouter();
   const [dragging, setDragging] = useState(false);
@@ -73,12 +116,21 @@ export default function SmartMenuImportClient() {
   const [sessionId, setSessionId] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [publishState, setPublishState] = useState<"idle" | "publishing" | "published">("idle");
+  const [uploadingImageFor, setUploadingImageFor] = useState<string | null>(null);
 
   const totalItems = useMemo(() => (draft ? flattenItems(draft).length : 0), [draft]);
+  const reviewCount = useMemo(() => getReviewCount(draft), [draft]);
+  const importantWarnings = useMemo(() => getImportantWarnings(draft), [draft]);
 
   async function getAccessToken() {
-    const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? "";
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData.session?.access_token) {
+      return sessionData.session.access_token;
+    }
+
+    const refreshed = await supabase.auth.refreshSession();
+    return refreshed.data.session?.access_token ?? "";
   }
 
   async function uploadFile(file: File) {
@@ -105,24 +157,32 @@ export default function SmartMenuImportClient() {
           setProgress(Math.min(95, Math.round((event.loaded / event.total) * 100)));
         }
       };
-      xhr.onload = () => {
-        setUploading(false);
-        setProgress(100);
-        const body = JSON.parse(xhr.responseText || "{}") as {
-          ok?: boolean;
+        xhr.onload = () => {
+          setUploading(false);
+          setProgress(100);
+          const body = JSON.parse(xhr.responseText || "{}") as {
+            ok?: boolean;
           error?: string;
           sessionId?: string;
           draft?: MenuImportDraft;
         };
-        if (xhr.status >= 200 && xhr.status < 300 && body.ok && body.draft && body.sessionId) {
-          setDraft(body.draft);
-          setSessionId(body.sessionId);
-          setMessage("Menu extracted. Review everything below before publishing.");
-        } else {
-          setMessage(body.error ?? "Menu import failed.");
-        }
-        resolve();
-      };
+          if (xhr.status >= 200 && xhr.status < 300 && body.ok && body.draft && body.sessionId) {
+            setDraft(body.draft);
+            setSessionId(body.sessionId);
+            const extractedCount = flattenItems(body.draft).length;
+            const nextWarnings = getImportantWarnings(body.draft);
+          if (extractedCount === 0 && nextWarnings.length > 0) {
+            setMessage(nextWarnings[0]?.message ?? "Menu import could not extract any items.");
+          } else if (extractedCount === 0) {
+            setMessage("Menu import finished, but no menu items were extracted.");
+          } else {
+            setMessage("Menu extracted. Review everything below before publishing.");
+          }
+          } else {
+            setMessage(xhr.status === 401 ? "Your session expired. Please sign in again and retry." : body.error ?? "Menu import failed.");
+          }
+          resolve();
+        };
       xhr.onerror = () => {
         setUploading(false);
         setMessage("Network error while uploading the menu.");
@@ -165,6 +225,47 @@ export default function SmartMenuImportClient() {
     });
   }
 
+  async function uploadItemImage(itemId: string, file: File) {
+    setUploadingImageFor(itemId);
+    setMessage(null);
+
+    const { data: auth } = await supabase.auth.getUser();
+    const vendorId = auth.user?.id;
+    if (!vendorId) {
+      setUploadingImageFor(null);
+      setMessage("Please sign in again before adding images.");
+      return;
+    }
+
+    const ext = fileExt(file.name);
+    const path = `vendors/${vendorId}/foods/import-${nowId()}.${ext}`;
+    const upload = await supabase.storage.from("food-images").upload(path, file, {
+      upsert: true,
+      contentType: file.type || "image/jpeg",
+    });
+
+    if (upload.error) {
+      setUploadingImageFor(null);
+      setMessage("Could not upload image: " + upload.error.message);
+      return;
+    }
+
+    const publicUrl = supabase.storage.from("food-images").getPublicUrl(path).data.publicUrl;
+    if (!publicUrl) {
+      setUploadingImageFor(null);
+      setMessage("Image uploaded but the public URL could not be created.");
+      return;
+    }
+
+    updateItem(itemId, (current) => ({
+      ...current,
+      imageUrl: publicUrl,
+      imageSource: "none",
+    }));
+    setUploadingImageFor(null);
+    setMessage("Image added.");
+  }
+
   async function saveReview() {
     if (!draft || !sessionId) return;
     setSaving(true);
@@ -181,12 +282,19 @@ export default function SmartMenuImportClient() {
     const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; draft?: MenuImportDraft } | null;
     setSaving(false);
     if (response.ok && body?.draft) setDraft(body.draft);
-    setMessage(response.ok && body?.ok ? "Review draft saved." : body?.error ?? "Could not save review draft.");
+    setMessage(
+      response.ok && body?.ok
+        ? "Review draft saved."
+        : response.status === 401
+          ? "Your session expired. Please sign in again and retry."
+          : body?.error ?? "Could not save review draft."
+    );
   }
 
   async function publishMenu() {
     if (!draft || !sessionId) return;
     setPublishing(true);
+    setPublishState("publishing");
     setMessage(null);
     const token = await getAccessToken();
     const response = await fetch(`/api/vendor/menu-import/${sessionId}/publish`, {
@@ -200,11 +308,15 @@ export default function SmartMenuImportClient() {
     const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
     setPublishing(false);
     if (response.ok && body?.ok) {
+      setPublishState("published");
       setMessage("Menu published successfully.");
-      router.push("/vendor/food");
+      window.setTimeout(() => {
+        router.push("/vendor/food");
+      }, 1400);
       return;
     }
-    setMessage(body?.error ?? "Could not publish menu.");
+    setPublishState("idle");
+    setMessage(response.status === 401 ? "Your session expired. Please sign in again and retry." : body?.error ?? "Could not publish menu.");
   }
 
   return (
@@ -265,14 +377,53 @@ export default function SmartMenuImportClient() {
       </div>
 
       {draft ? (
-        <div className="rounded-3xl border bg-white p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm text-gray-600">Human review</p>
-              <p className="text-lg font-semibold">{totalItems} extracted menu item{totalItems === 1 ? "" : "s"}</p>
-              <p className="mt-1 text-xs text-gray-500">{draft.sourceSummary}</p>
+        <div className="space-y-4 pb-24">
+          {publishState !== "idle" ? (
+            <div className="rounded-3xl border bg-white p-5">
+              <div className="flex items-center gap-3">
+                {publishState === "publishing" ? (
+                  <>
+                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-black" />
+                    <div>
+                      <p className="text-sm text-gray-600">Publishing</p>
+                      <p className="font-semibold text-gray-900">Publishing your menu items now...</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white">
+                      ✓
+                    </div>
+                    <div>
+                      <p className="text-sm text-emerald-700">Published</p>
+                      <p className="font-semibold text-gray-900">Menu published successfully. Redirecting to your food list...</p>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+          ) : null}
+
+          <div className="rounded-3xl border bg-white p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm text-gray-600">Human review</p>
+                <p className="text-lg font-semibold">{totalItems} extracted menu item{totalItems === 1 ? "" : "s"}</p>
+                <p className="mt-1 text-sm text-gray-500">{draft.sourceSummary}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm sm:flex sm:flex-wrap">
+                <div className="rounded-2xl bg-gray-50 px-3 py-2 text-center">
+                  <p className="text-xs text-gray-500">Categories</p>
+                  <p className="font-semibold text-gray-900">{draft.categories.length}</p>
+                </div>
+                <div className="rounded-2xl bg-gray-50 px-3 py-2 text-center">
+                  <p className="text-xs text-gray-500">Check items</p>
+                  <p className="font-semibold text-gray-900">{reviewCount}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
                 className="rounded-xl border px-4 py-2 text-sm"
@@ -287,119 +438,117 @@ export default function SmartMenuImportClient() {
               >
                 Regroup categories
               </button>
-              <button type="button" className="rounded-xl border px-4 py-2 text-sm" onClick={saveReview} disabled={saving}>
-                {saving ? "Saving..." : "Save draft"}
-              </button>
-              <button
-                type="button"
-                className="rounded-xl bg-black px-4 py-2 text-sm text-white"
-                onClick={publishMenu}
-                disabled={publishing}
-              >
-                {publishing ? "Publishing..." : "Approve and publish"}
-              </button>
             </div>
           </div>
 
-          {draft.warnings.length > 0 ? (
-            <div className="mt-4 space-y-2">
-              {draft.warnings.map((warning, index) => (
-                <div key={`${warning.code}-${index}`} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                  {warning.message}
-                </div>
-              ))}
+          {importantWarnings.length > 0 ? (
+            <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm font-semibold text-amber-950">Review notes</p>
+              <div className="mt-3 space-y-2">
+                {importantWarnings.map((warning, index) => (
+                  <p key={`${warning.code}-${index}`} className="text-sm text-amber-900">
+                    {warning.message}
+                  </p>
+                ))}
+              </div>
             </div>
           ) : null}
 
-          <div className="mt-5 space-y-5">
+          <div className="space-y-5">
             {draft.categories.map((category) => (
-              <section key={category.id} className="rounded-2xl border p-4">
-                <div className="flex items-center justify-between gap-3">
+              <section key={category.id} className="rounded-3xl border bg-white p-4 sm:p-5">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="font-semibold">{category.name}</p>
-                    <p className="text-xs text-gray-600">{category.inferred ? "Inferred category" : "Detected from source"}</p>
+                    <p className="text-xs text-gray-600">{category.inferred ? "Suggested category" : "Detected from source"}</p>
                   </div>
                   <p className="text-sm text-gray-500">{category.items.length} item{category.items.length === 1 ? "" : "s"}</p>
                 </div>
 
                 <div className="mt-4 space-y-3">
                   {category.items.map((item) => (
-                    <div key={item.id} className="rounded-2xl border bg-gray-50 p-4">
-                      <div className="grid gap-4 lg:grid-cols-[120px_1fr]">
-                        <div>
-                          <div className="h-28 overflow-hidden rounded-2xl bg-white">
-                            {item.imageUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={item.imageUrl} alt={item.name} className="h-full w-full object-cover" />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-xs text-gray-400">No image</div>
-                            )}
+                    <div key={item.id} className="rounded-3xl border bg-gray-50 p-4">
+                      <div className="grid gap-4 lg:grid-cols-[112px_1fr]">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-3">
+                            <div className="h-20 w-20 overflow-hidden rounded-2xl bg-white ring-1 ring-gray-200">
+                              {item.imageUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={item.imageUrl} alt={item.name} className="h-full w-full object-cover" />
+                              ) : (
+                                <div className="flex h-full items-center justify-center text-[11px] text-gray-400">No image</div>
+                              )}
+                            </div>
+                            <label className="inline-flex cursor-pointer items-center rounded-xl border bg-white px-3 py-2 text-sm font-medium text-gray-700">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0] ?? null;
+                                  if (file) void uploadItemImage(item.id, file);
+                                  event.currentTarget.value = "";
+                                }}
+                                disabled={uploadingImageFor === item.id}
+                              />
+                              {uploadingImageFor === item.id ? "Uploading..." : item.imageUrl ? "Change image" : "Add image"}
+                            </label>
                           </div>
-                          <input
-                            className="mt-2 w-full rounded-xl border bg-white px-3 py-2 text-xs"
-                            placeholder="Replace image URL"
-                            value={item.imageUrl}
-                            onChange={(event) => updateItem(item.id, (current) => ({ ...current, imageUrl: event.target.value }))}
-                          />
                         </div>
 
-                        <div className="grid gap-2">
-                          <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="grid gap-3">
+                          <div className="flex flex-wrap gap-2">
+                            <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-700">{getPricingSummary(item)}</span>
+                            {item.lowConfidence ? <span className="rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-900">Check OCR</span> : null}
+                            {!item.imageUrl ? <span className="rounded-full bg-gray-200 px-3 py-1 text-xs text-gray-700">No image</span> : null}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
                             <input
-                              className="rounded-xl border bg-white px-3 py-2 text-sm"
+                              className="min-w-0 rounded-xl border bg-white px-3 py-2 text-sm"
                               value={item.name}
+                              placeholder="Item name"
                               onChange={(event) => updateItem(item.id, (current) => ({ ...current, name: event.target.value }))}
                             />
                             <input
-                              className="rounded-xl border bg-white px-3 py-2 text-sm"
+                              className="min-w-0 rounded-xl border bg-white px-3 py-2 text-sm"
                               value={item.categoryName}
+                              placeholder="Category"
                               onChange={(event) => updateItem(item.id, (current) => ({ ...current, categoryName: event.target.value }))}
                             />
                           </div>
 
-                          <textarea
-                            className="rounded-xl border bg-white px-3 py-2 text-sm"
-                            rows={2}
-                            value={item.description}
-                            onChange={(event) => updateItem(item.id, (current) => ({ ...current, description: event.target.value }))}
-                          />
-
-                          <div className="grid gap-2 sm:grid-cols-4">
-                            <select
-                              className="rounded-xl border bg-white px-3 py-2 text-sm"
-                              value={item.foodType}
-                              onChange={(event) =>
-                                updateItem(item.id, (current) => ({ ...current, foodType: event.target.value as MenuImportItemDraft["foodType"] }))
-                              }
-                            >
-                              <option value="single">Single</option>
-                              <option value="combo">Combo</option>
-                            </select>
-                            <select
-                              className="rounded-xl border bg-white px-3 py-2 text-sm"
-                              value={item.pricingType}
-                              onChange={(event) =>
-                                updateItem(item.id, (current) => ({ ...current, pricingType: event.target.value as MenuImportItemDraft["pricingType"] }))
-                              }
-                            >
-                              <option value="fixed">Fixed</option>
-                              <option value="per_scoop">Per scoop</option>
-                              <option value="per_unit">Per unit</option>
-                              <option value="variant">Variant</option>
-                            </select>
-                            <input
-                              className="rounded-xl border bg-white px-3 py-2 text-sm"
-                              inputMode="numeric"
-                              value={item.price ?? ""}
-                              onChange={(event) => updateItem(item.id, (current) => ({ ...current, price: Number(event.target.value || 0) }))}
-                              placeholder="Price"
-                            />
-                            <input
-                              className="rounded-xl border bg-white px-3 py-2 text-sm"
-                              value={item.unitLabel ?? ""}
-                              onChange={(event) => updateItem(item.id, (current) => ({ ...current, unitLabel: event.target.value || null }))}
-                              placeholder="Unit label"
-                            />
+                          <div className="grid grid-cols-2 gap-2">
+                            {item.pricingType !== "variant" ? (
+                              <input
+                                className="min-w-0 rounded-xl border bg-white px-3 py-2 text-sm"
+                                inputMode="numeric"
+                                value={item.price ?? ""}
+                                onChange={(event) =>
+                                  updateItem(item.id, (current) => ({
+                                    ...current,
+                                    price: event.target.value ? Number(event.target.value) : null,
+                                  }))
+                                }
+                                placeholder="Price"
+                              />
+                            ) : (
+                              <div className="min-w-0 rounded-xl bg-white px-3 py-2 text-sm text-gray-500">Price comes from variants</div>
+                            )}
+                            {item.pricingType === "per_unit" ? (
+                              <input
+                                className="min-w-0 rounded-xl border bg-white px-3 py-2 text-sm"
+                                value={item.unitLabel ?? ""}
+                                onChange={(event) => updateItem(item.id, (current) => ({ ...current, unitLabel: event.target.value || null }))}
+                                placeholder="Unit"
+                              />
+                            ) : item.pricingType === "per_scoop" ? (
+                              <div className="min-w-0 rounded-xl bg-white px-3 py-2 text-sm text-gray-500">Per scoop</div>
+                            ) : (
+                              <div className="min-w-0 rounded-xl bg-white px-3 py-2 text-sm text-gray-400">
+                                {item.pricingType === "variant" ? "Edit sizes below" : "No unit"}
+                              </div>
+                            )}
                           </div>
 
                           {item.variants.length > 0 ? (
@@ -407,35 +556,29 @@ export default function SmartMenuImportClient() {
                               <p className="text-xs font-medium text-gray-600">Variants</p>
                               <div className="mt-2 space-y-2">
                                 {item.variants.map((variant) => (
-                                  <div key={variant.id} className="grid gap-2 sm:grid-cols-3">
+                                  <div key={variant.id} className="grid grid-cols-[minmax(0,1fr)_96px] gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
                                     <input
-                                      className="rounded-xl border px-3 py-2 text-sm"
-                                      value={variant.name}
+                                      className="min-w-0 rounded-xl border px-3 py-2 text-sm"
+                                      value={isDuplicateVariantLabel(variant.name, variant.size) ? variant.size ?? variant.name : variant.name}
+                                      placeholder="Option"
                                       onChange={(event) =>
                                         updateItem(item.id, (current) => ({
                                           ...current,
                                           variants: current.variants.map((entry) =>
-                                            entry.id === variant.id ? { ...entry, name: event.target.value } : entry
+                                            entry.id === variant.id
+                                              ? isDuplicateVariantLabel(entry.name, entry.size)
+                                                ? { ...entry, name: event.target.value, size: event.target.value || null }
+                                                : { ...entry, name: event.target.value }
+                                              : entry
                                           ),
                                         }))
                                       }
                                     />
                                     <input
-                                      className="rounded-xl border px-3 py-2 text-sm"
-                                      value={variant.size ?? ""}
-                                      onChange={(event) =>
-                                        updateItem(item.id, (current) => ({
-                                          ...current,
-                                          variants: current.variants.map((entry) =>
-                                            entry.id === variant.id ? { ...entry, size: event.target.value || null } : entry
-                                          ),
-                                        }))
-                                      }
-                                    />
-                                    <input
-                                      className="rounded-xl border px-3 py-2 text-sm"
+                                      className="min-w-0 rounded-xl border px-3 py-2 text-sm"
                                       inputMode="numeric"
                                       value={variant.price}
+                                      placeholder="Price"
                                       onChange={(event) =>
                                         updateItem(item.id, (current) => ({
                                           ...current,
@@ -451,14 +594,12 @@ export default function SmartMenuImportClient() {
                             </div>
                           ) : null}
 
-                          <div className="flex flex-wrap gap-2">
-                            {item.lowConfidence ? <span className="rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-900">Low confidence OCR</span> : null}
-                            {item.imageSource !== "none" ? (
-                              <span className="rounded-full bg-gray-200 px-3 py-1 text-xs text-gray-700">
-                                Image: {item.imageSource === "search" ? "Google search" : "Generated"}
-                              </span>
-                            ) : null}
-                            <button type="button" className="rounded-full border px-3 py-1 text-xs" onClick={() => removeItem(item.id)}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700"
+                              onClick={() => removeItem(item.id)}
+                            >
                               Remove item
                             </button>
                           </div>
@@ -469,6 +610,24 @@ export default function SmartMenuImportClient() {
                 </div>
               </section>
             ))}
+          </div>
+
+          <div className="sticky bottom-4 z-10">
+            <div className="rounded-3xl border bg-white/95 p-3 shadow-lg backdrop-blur">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button type="button" className="rounded-xl border px-4 py-3 text-sm sm:flex-1" onClick={saveReview} disabled={saving}>
+                  {saving ? "Saving..." : "Save draft"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl bg-black px-4 py-3 text-sm text-white sm:flex-1"
+                  onClick={publishMenu}
+                  disabled={publishing || publishState !== "idle"}
+                >
+                  {publishing ? "Publishing..." : "Approve and publish"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}

@@ -487,6 +487,10 @@ export default function FoodCheckoutPage() {
           total_amount: vendorTotal,
           delivery_address: deliveryAddressPayload,
           delivery_address_source: "manual",
+          customer_lat: geoPoint?.lat ?? null,
+          customer_lng: geoPoint?.lng ?? null,
+          customer_location_accuracy_m: geoPoint?.accuracy ?? null,
+          customer_location_captured_at: geoPoint ? new Date().toISOString() : null,
           customer_phone: phoneClean,
           notes: isCustomVendor
             ? withErrandQuoteMeta(

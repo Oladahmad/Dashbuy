@@ -21,6 +21,10 @@ type LogisticsJobRow = {
   order_type: string | null;
   food_mode: string | null;
   order_total: number | null;
+  customer_lat?: number | null;
+  customer_lng?: number | null;
+  customer_location_accuracy_m?: number | null;
+  customer_location_captured_at?: string | null;
 };
 
 type VendorProfile = {
@@ -121,7 +125,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     const [{ data: orderRow }, { data: vendorRow }] = await Promise.all([
       a
         .from("orders")
-        .select("notes,delivery_fee,total,total_amount")
+        .select("notes,delivery_fee,total,total_amount,customer_lat,customer_lng,customer_location_accuracy_m,customer_location_captured_at")
         .eq("id", row.order_id)
         .maybeSingle(),
       a
@@ -132,7 +136,16 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     ]);
 
     const vendor = (vendorRow ?? null) as VendorProfile | null;
-    const order = (orderRow ?? null) as { notes: string | null; delivery_fee: number | null; total: number | null; total_amount: number | null } | null;
+    const order = (orderRow ?? null) as {
+      notes: string | null;
+      delivery_fee: number | null;
+      total: number | null;
+      total_amount: number | null;
+      customer_lat: number | null;
+      customer_lng: number | null;
+      customer_location_accuracy_m: number | null;
+      customer_location_captured_at: string | null;
+    } | null;
 
     const note = cleanText(order?.notes);
     const manual = parseManualLogisticsNotes(note);
@@ -151,6 +164,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
         customer_note: manual.isManual && manual.source !== "vendor" ? manual.itemsText || null : stripLogisticsMeta(note) || null,
         delivery_fee: safeNumber(order?.delivery_fee, 0),
         order_total: preferPositive(row.order_total, order?.total_amount ?? order?.total),
+        customer_lat: typeof order?.customer_lat === "number" ? order.customer_lat : null,
+        customer_lng: typeof order?.customer_lng === "number" ? order.customer_lng : null,
+        customer_location_accuracy_m: safeNumber(order?.customer_location_accuracy_m, 0) || null,
+        customer_location_captured_at: cleanText(order?.customer_location_captured_at) || null,
       },
     });
   } catch (e: unknown) {

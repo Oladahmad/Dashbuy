@@ -21,6 +21,10 @@ type LogisticsJobRow = {
   order_type: string | null;
   food_mode: string | null;
   order_total: number | null;
+  customer_lat?: number | null;
+  customer_lng?: number | null;
+  customer_location_accuracy_m?: number | null;
+  customer_location_captured_at?: string | null;
 };
 
 type VendorProfile = {
@@ -137,16 +141,36 @@ export async function GET(req: Request) {
     const orderNoteMap = new Map<string, string>();
     const orderDeliveryFeeMap = new Map<string, number>();
     const orderTotalMap = new Map<string, number>();
+    const orderExactLocationMap = new Map<
+      string,
+      { lat: number | null; lng: number | null; accuracy: number | null; capturedAt: string | null }
+    >();
     if (orderIds.length > 0) {
       const { data: orderRows } = await a
         .from("orders")
-        .select("id,notes,delivery_fee,total,total_amount")
+        .select("id,notes,delivery_fee,total,total_amount,customer_lat,customer_lng,customer_location_accuracy_m,customer_location_captured_at")
         .in("id", orderIds);
 
-      for (const o of (orderRows ?? []) as Array<{ id: string; notes: string | null; delivery_fee: number | null; total: number | null; total_amount: number | null }>) {
+      for (const o of (orderRows ?? []) as Array<{
+        id: string;
+        notes: string | null;
+        delivery_fee: number | null;
+        total: number | null;
+        total_amount: number | null;
+        customer_lat: number | null;
+        customer_lng: number | null;
+        customer_location_accuracy_m: number | null;
+        customer_location_captured_at: string | null;
+      }>) {
         orderNoteMap.set(o.id, cleanText(o.notes));
         orderDeliveryFeeMap.set(o.id, safeNumber(o.delivery_fee, 0));
         orderTotalMap.set(o.id, safeNumber(o.total_amount ?? o.total, 0));
+        orderExactLocationMap.set(o.id, {
+          lat: typeof o.customer_lat === "number" ? o.customer_lat : null,
+          lng: typeof o.customer_lng === "number" ? o.customer_lng : null,
+          accuracy: safeNumber(o.customer_location_accuracy_m, 0) || null,
+          capturedAt: cleanText(o.customer_location_captured_at) || null,
+        });
       }
     }
 
@@ -178,11 +202,19 @@ export async function GET(req: Request) {
           rider_map_url: manual.riderMapUrl || null,
           delivery_fee: orderDeliveryFeeMap.get(j.order_id) ?? 0,
           order_total: preferPositive(j.order_total, orderTotalMap.get(j.order_id)),
-          _hide: manual.isManual && manual.source === "vendor",
+          customer_lat: orderExactLocationMap.get(j.order_id)?.lat ?? null,
+          customer_lng: orderExactLocationMap.get(j.order_id)?.lng ?? null,
+          customer_location_accuracy_m: orderExactLocationMap.get(j.order_id)?.accuracy ?? null,
+          customer_location_captured_at: orderExactLocationMap.get(j.order_id)?.capturedAt ?? null,
+          hideFromLogistics: manual.isManual && manual.source === "vendor",
         };
       })
-      .filter((j) => !j._hide)
-      .map(({ _hide, ...rest }) => rest);
+      .filter((j) => !j.hideFromLogistics)
+      .map((j) => {
+        const next = { ...j };
+        delete next.hideFromLogistics;
+        return next;
+      });
 
     return NextResponse.json({ ok: true, jobs });
   } catch (e: unknown) {

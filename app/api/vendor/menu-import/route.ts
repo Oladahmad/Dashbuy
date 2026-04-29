@@ -61,7 +61,13 @@ export async function POST(req: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected menu import error.";
     const status =
-      /unsupported|empty|size limit|required|invalid/i.test(message) ? 400 : 500;
+      error instanceof Error && error.name === "AuthError"
+        ? 401
+        : error instanceof Error && error.name === "RoleError"
+          ? 403
+          : /unsupported|empty|size limit|required/i.test(message)
+            ? 400
+            : 500;
     return NextResponse.json(
       { ok: false, error: message },
       { status }

@@ -3,6 +3,9 @@ import type { MenuImportDraft } from "./types";
 import { cleanText, flattenDraftItems, parsePrice, slugify } from "./utils";
 
 export async function publishMenuDraft(sessionId: string, vendorId: string, draft: MenuImportDraft) {
+  const createdFoodItemIds: string[] = [];
+  const createdMenuItemIds: string[] = [];
+
   const { data: session, error: sessionLookupError } = await supabaseAdmin
     .from("menu_import_sessions")
     .select("id,status")
@@ -75,7 +78,10 @@ export async function publishMenuDraft(sessionId: string, vendorId: string, draf
         .select("id")
         .maybeSingle<{ id: string }>();
 
-      if (menuItemError || !menuItem?.id) throw new Error("Could not save menu item: " + (menuItemError?.message ?? "Missing item id"));
+      if (menuItemError || !menuItem?.id) {
+        throw new Error(`Could not save menu item "${item.name}" in "${category.name}": ${menuItemError?.message ?? "Missing item id"}`);
+      }
+      createdMenuItemIds.push(menuItem.id);
 
       const manualFoodPayload = {
         vendor_id: vendorId,
@@ -99,7 +105,10 @@ export async function publishMenuDraft(sessionId: string, vendorId: string, draf
         .insert(manualFoodPayload)
         .select("id")
         .maybeSingle<{ id: string }>();
-      if (foodItemError || !foodItem?.id) throw new Error("Could not publish food item: " + (foodItemError?.message ?? "Missing food item id"));
+      if (foodItemError || !foodItem?.id) {
+        throw new Error(`Could not publish food item "${item.name}" in "${category.name}": ${foodItemError?.message ?? "Missing food item id"}`);
+      }
+      createdFoodItemIds.push(foodItem.id);
 
       if (item.variants.length > 0) {
         const variants = item.variants
@@ -126,7 +135,7 @@ export async function publishMenuDraft(sessionId: string, vendorId: string, draf
               sort_order: variant.sort_order,
             }))
           );
-          if (menuVariantError) throw new Error("Could not save menu variants: " + menuVariantError.message);
+          if (menuVariantError) throw new Error(`Could not save menu variants for "${item.name}": ${menuVariantError.message}`);
 
           const { error: foodVariantError } = await supabaseAdmin.from("food_item_variants").insert(
             variants.map((variant) => ({
@@ -134,10 +143,9 @@ export async function publishMenuDraft(sessionId: string, vendorId: string, draf
               name: variant.name,
               price: variant.price,
               is_available: true,
-              sort_order: variant.sort_order,
             }))
           );
-          if (foodVariantError) throw new Error("Could not publish food variants: " + foodVariantError.message);
+          if (foodVariantError) throw new Error(`Could not publish food variants for "${item.name}": ${foodVariantError.message}`);
         }
       }
 
@@ -163,6 +171,12 @@ export async function publishMenuDraft(sessionId: string, vendorId: string, draf
 
     if (sessionError) throw new Error("Menu published, but session update failed: " + sessionError.message);
   } catch (error) {
+    if (createdFoodItemIds.length > 0) {
+      await supabaseAdmin.from("food_items").delete().in("id", createdFoodItemIds);
+    }
+    if (createdMenuItemIds.length > 0) {
+      await supabaseAdmin.from("menu_items").delete().in("id", createdMenuItemIds);
+    }
     await supabaseAdmin
       .from("menu_import_sessions")
       .update({

@@ -10,7 +10,7 @@ export const MENU_IMPORT_SUPPORTED_MIME_TYPES = new Map<string, "image" | "pdf" 
 ]);
 
 export const PLATFORM_CATEGORY_LABELS = {
-  main: "Rice Dishes",
+  main: "Main",
   side: "Sides",
   protein: "Proteins",
   swallow: "Swallow",
@@ -22,12 +22,12 @@ export const PLATFORM_CATEGORY_LABELS = {
 export type PlatformFoodCategory = keyof typeof PLATFORM_CATEGORY_LABELS;
 
 export const CATEGORY_HINTS: Array<{ category: PlatformFoodCategory; terms: string[] }> = [
-  { category: "main", terms: ["jollof", "fried rice", "rice", "spaghetti", "pasta", "noodles", "beans", "yam"] },
+  { category: "main", terms: ["jollof", "fried rice", "white rice", "native rice", "rice", "beans"] },
   { category: "swallow", terms: ["amala", "semo", "eba", "pounded yam", "fufu", "tuwo"] },
-  { category: "soup", terms: ["egusi", "ewedu", "ogbono", "okra", "soup", "stew", "afang", "nsala"] },
-  { category: "protein", terms: ["chicken", "turkey", "beef", "fish", "goat", "ponmo", "snail", "gizzard"] },
+  { category: "soup", terms: ["egusi", "ewedu", "ogbono", "okra", "soup", "stew", "afang", "nsala", "eforiro", "efo riro", "gbegiri"] },
+  { category: "protein", terms: ["chicken", "turkey", "beef", "fish", "goat", "ponmo", "snail", "gizzard", "titus", "assorted", "egg"] },
   { category: "drink", terms: ["water", "juice", "fanta", "coke", "malt", "smoothie", "zobo", "drink"] },
-  { category: "side", terms: ["moi moi", "salad", "plantain", "coleslaw", "egg", "fries", "chips"] },
+  { category: "side", terms: ["moi moi", "moimoi", "salad", "plantain", "coleslaw", "egg", "fries", "chips", "pepper soup"] },
   { category: "extra", terms: ["addon", "add on", "extra", "sauce", "pepper", "dip"] },
 ];
 

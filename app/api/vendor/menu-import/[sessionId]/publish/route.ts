@@ -15,9 +15,15 @@ export async function POST(req: Request, context: { params: Promise<{ sessionId:
     await publishMenuDraft(sessionId, actor.userId, normalizedDraft);
     return NextResponse.json({ ok: true });
   } catch (error) {
+    const status =
+      error instanceof Error && error.name === "AuthError"
+        ? 401
+        : error instanceof Error && error.name === "RoleError"
+          ? 403
+          : 500;
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Unexpected publish error." },
-      { status: 500 }
+      { status }
     );
   }
 }

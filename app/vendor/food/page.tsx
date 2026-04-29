@@ -74,6 +74,8 @@ export default function VendorFoodPage() {
   const [items, setItems] = useState<FoodItemRow[]>([]);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<FoodItemRow | null>(null);
@@ -179,6 +181,9 @@ export default function VendorFoodPage() {
     [items]
   );
 
+  const allItemIds = useMemo(() => items.map((x) => x.id), [items]);
+  const allSelected = items.length > 0 && selectedIds.length === items.length;
+
   async function toggleAvailable(it: FoodItemRow) {
     setMsg(null);
     setTogglingId(it.id);
@@ -204,23 +209,55 @@ export default function VendorFoodPage() {
     setOpenMenuId(null);
   }
 
+  async function deleteFoods(ids: string[]) {
+    if (ids.length === 0) return null;
+    setMsg(null);
+    setBulkDeleting(true);
+
+    const { error } = await supabase.from("food_items").delete().in("id", ids);
+    if (error) {
+      setBulkDeleting(false);
+      const message = "Delete food failed: " + error.message;
+      setMsg(message);
+      return message;
+    }
+
+    const deletedIdSet = new Set(ids);
+    setItems((prev) => prev.filter((x) => !deletedIdSet.has(x.id)));
+    setSelectedIds((prev) => prev.filter((id) => !deletedIdSet.has(id)));
+    if (selectedItem && deletedIdSet.has(selectedItem.id)) {
+      closeDetails();
+    }
+    setBulkDeleting(false);
+    setOpenMenuId(null);
+    return null;
+  }
+
   async function deleteFoodFromList(it: FoodItemRow) {
     const yes = window.confirm("Delete this food item?");
     if (!yes) return;
 
-    setMsg(null);
     setTogglingId(it.id);
-
-    const { error } = await supabase.from("food_items").delete().eq("id", it.id);
-    if (error) {
-      setTogglingId(null);
-      setMsg("Delete food failed: " + error.message);
-      return;
-    }
-
-    setItems((prev) => prev.filter((x) => x.id !== it.id));
+    await deleteFoods([it.id]);
     setTogglingId(null);
-    setOpenMenuId(null);
+  }
+
+  async function deleteSelectedFoods() {
+    if (selectedIds.length === 0) return;
+    const yes = window.confirm(
+      `Delete ${selectedIds.length} selected food item${selectedIds.length === 1 ? "" : "s"}?`
+    );
+    if (!yes) return;
+
+    await deleteFoods(selectedIds);
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((prev) => (prev.length === items.length ? [] : allItemIds));
   }
 
   async function openDetails(it: FoodItemRow) {
@@ -503,15 +540,12 @@ export default function VendorFoodPage() {
     if (!confirm("Delete this food item?")) return;
 
     setItemDeleting(true);
-    const { error } = await supabase.from("food_items").delete().eq("id", selectedItem.id);
-    if (error) {
-      setItemDeleting(false);
-      setDetailsMsg("Delete food failed: " + error.message);
-      return;
+    setDetailsMsg(null);
+    const errorMessage = await deleteFoods([selectedItem.id]);
+    if (errorMessage) {
+      setDetailsMsg(errorMessage);
     }
-
-    setItems((prev) => prev.filter((x) => x.id !== selectedItem.id));
-    closeDetails();
+    setItemDeleting(false);
   }
 
   return (
@@ -541,6 +575,34 @@ export default function VendorFoodPage() {
         </div>
 
         {msg ? <p className="mt-3 text-sm text-red-600">{msg}</p> : null}
+
+        {items.length > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed p-3">
+            <p className="text-sm text-gray-600">
+              {selectedIds.length > 0
+                ? `${selectedIds.length} selected`
+                : "Select foods to delete them in one go."}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-xl border px-3 py-2 text-sm disabled:opacity-50"
+                onClick={toggleSelectAll}
+                disabled={bulkDeleting}
+              >
+                {allSelected ? "Clear selection" : "Select all"}
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border px-3 py-2 text-sm text-red-600 disabled:opacity-50"
+                onClick={deleteSelectedFoods}
+                disabled={selectedIds.length === 0 || bulkDeleting}
+              >
+                {bulkDeleting ? "Deleting..." : "Delete selected"}
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {loading ? (
@@ -561,6 +623,16 @@ export default function VendorFoodPage() {
               <div className="mt-4 space-y-2">
                 {combos.map((it) => (
                   <div key={it.id} className="rounded-2xl border bg-white p-3 flex gap-3">
+                    <label className="flex shrink-0 items-start pt-1">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-black"
+                        checked={selectedIds.includes(it.id)}
+                        onChange={() => toggleSelected(it.id)}
+                        disabled={bulkDeleting}
+                        aria-label={`Select ${it.name}`}
+                      />
+                    </label>
                     <div className="h-14 w-14 rounded-xl bg-gray-100 overflow-hidden shrink-0">
                       {it.image_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -614,7 +686,7 @@ export default function VendorFoodPage() {
                               type="button"
                               className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-100 disabled:opacity-50"
                               onClick={() => deleteFoodFromList(it)}
-                              disabled={togglingId === it.id}
+                              disabled={togglingId === it.id || bulkDeleting}
                             >
                               Delete
                             </button>
@@ -622,7 +694,7 @@ export default function VendorFoodPage() {
                               type="button"
                               className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100 disabled:opacity-50"
                               onClick={() => toggleAvailable(it)}
-                              disabled={togglingId === it.id}
+                              disabled={togglingId === it.id || bulkDeleting}
                             >
                               {togglingId === it.id
                                 ? "Updating..."
@@ -652,6 +724,16 @@ export default function VendorFoodPage() {
               <div className="mt-4 space-y-2">
                 {singles.map((it) => (
                   <div key={it.id} className="rounded-2xl border bg-white p-3 flex gap-3">
+                    <label className="flex shrink-0 items-start pt-1">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-black"
+                        checked={selectedIds.includes(it.id)}
+                        onChange={() => toggleSelected(it.id)}
+                        disabled={bulkDeleting}
+                        aria-label={`Select ${it.name}`}
+                      />
+                    </label>
                     <div className="h-14 w-14 rounded-xl bg-gray-100 overflow-hidden shrink-0">
                       {it.image_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -705,7 +787,7 @@ export default function VendorFoodPage() {
                               type="button"
                               className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-100 disabled:opacity-50"
                               onClick={() => deleteFoodFromList(it)}
-                              disabled={togglingId === it.id}
+                              disabled={togglingId === it.id || bulkDeleting}
                             >
                               Delete
                             </button>
@@ -713,7 +795,7 @@ export default function VendorFoodPage() {
                               type="button"
                               className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-100 disabled:opacity-50"
                               onClick={() => toggleAvailable(it)}
-                              disabled={togglingId === it.id}
+                              disabled={togglingId === it.id || bulkDeleting}
                             >
                               {togglingId === it.id
                                 ? "Updating..."

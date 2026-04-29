@@ -10,6 +10,26 @@ function getClient() {
   return new OpenAI({ apiKey });
 }
 
+function getImageClient() {
+  const xaiApiKey = process.env.XAI_API_KEY || "";
+  if (xaiApiKey) {
+    return {
+      client: new OpenAI({
+        apiKey: xaiApiKey,
+        baseURL: "https://api.x.ai/v1",
+      }),
+      model: process.env.XAI_IMAGE_MODEL || "grok-imagine-image",
+    };
+  }
+
+  const openAiApiKey = process.env.OPENAI_API_KEY || "";
+  if (!openAiApiKey) throw new Error("Missing OPENAI_API_KEY or XAI_API_KEY on server.");
+  return {
+    client: new OpenAI({ apiKey: openAiApiKey }),
+    model: DEFAULT_MENU_IMAGE_MODEL,
+  };
+}
+
 function buildExtractionPrompt(upload: IngestedMenuUpload) {
   return [
     "Extract a Nigerian restaurant menu into structured JSON.",
@@ -81,18 +101,19 @@ export async function extractMenuWithOpenAI(upload: IngestedMenuUpload): Promise
 }
 
 export async function generateFoodImage(prompt: string): Promise<ImageCandidateResult> {
-  const client = getClient();
+  const { client, model } = getImageClient();
   const response = await client.images.generate({
-    model: DEFAULT_MENU_IMAGE_MODEL,
+    model,
     prompt,
     size: "1024x1024",
   });
 
   const imageBase64 = response.data?.[0]?.b64_json;
-  if (!imageBase64) throw new Error("Image generation returned no image.");
+  const imageUrl = response.data?.[0]?.url;
+  if (!imageBase64 && !imageUrl) throw new Error("Image generation returned no image.");
 
   return {
-    imageUrl: `data:image/png;base64,${imageBase64}`,
+    imageUrl: imageBase64 ? `data:image/png;base64,${imageBase64}` : imageUrl!,
     source: "generated",
   };
 }

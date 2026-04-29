@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import { buildCustomerPinUrl } from "@/lib/customerLocation";
 
 type JobStatus = "pending_pickup" | "picked_up" | "delivered" | "cancelled";
 
@@ -29,6 +30,10 @@ type LogisticsJobRow = {
   delivery_fee?: number | null;
   customer_note?: string | null;
   rider_map_url?: string | null;
+  customer_lat?: number | null;
+  customer_lng?: number | null;
+  customer_location_accuracy_m?: number | null;
+  customer_location_captured_at?: string | null;
 };
 
 type OrderItemLine = {
@@ -178,7 +183,11 @@ export default function LogisticsPage() {
 
   const list = tab === "pending_pickup" ? pendingPickupJobs : pickedUpJobs;
   const selectedMapUrl = useMemo(
-    () => buildGoogleMapsUrl(selected?.delivery_address, selected?.customer_note),
+    () =>
+      buildCustomerPinUrl({
+        lat: selected?.customer_lat ?? null,
+        lng: selected?.customer_lng ?? null,
+      }) ?? buildGoogleMapsUrl(selected?.delivery_address, selected?.customer_note),
     [selected]
   );
 
@@ -360,6 +369,7 @@ export default function LogisticsPage() {
               const customerPhone = cleanText(j.customer_phone) ? j.customer_phone : "No customer phone";
               const deliveryAddress = cleanText(j.delivery_address) ? j.delivery_address : "No delivery address";
               const customerNote = cleanText(j.customer_note) ? j.customer_note : null;
+              const exactPin = buildCustomerPinUrl({ lat: j.customer_lat ?? null, lng: j.customer_lng ?? null });
 
               return (
                 <button
@@ -386,6 +396,12 @@ export default function LogisticsPage() {
                       <p className="text-xs text-gray-600 truncate">Customer phone: {customerPhone}</p>
 
                       <p className="text-xs text-gray-600 mt-2 truncate">Delivery: {deliveryAddress}</p>
+                      {exactPin ? (
+                        <p className="text-xs text-emerald-700 mt-1 truncate">
+                          Exact pin available
+                          {j.customer_location_accuracy_m ? ` (+/-${Math.round(j.customer_location_accuracy_m)}m)` : ""}
+                        </p>
+                      ) : null}
                       {customerNote ? (
                         <p className="text-xs text-gray-600 mt-1 truncate">Note: {customerNote}</p>
                       ) : null}
@@ -453,6 +469,12 @@ export default function LogisticsPage() {
                 <p className="text-sm">{cleanText(selected.customer_name) ? selected.customer_name : "Customer"}</p>
                 <p className="text-sm mt-1">Phone: {cleanText(selected.customer_phone) ? selected.customer_phone : "No customer phone"}</p>
                 <p className="text-sm mt-1">Delivery address: {cleanText(selected.delivery_address) ? selected.delivery_address : "No delivery address"}</p>
+                {selected.customer_lat != null && selected.customer_lng != null ? (
+                  <p className="text-sm mt-1">
+                    Exact pin: {selected.customer_lat.toFixed(6)}, {selected.customer_lng.toFixed(6)}
+                    {selected.customer_location_accuracy_m ? ` (+/-${Math.round(selected.customer_location_accuracy_m)}m)` : ""}
+                  </p>
+                ) : null}
                 {cleanText(selected.customer_note) ? (
                   <p className="text-sm mt-1">Note: {selected.customer_note}</p>
                 ) : null}
@@ -506,7 +528,9 @@ export default function LogisticsPage() {
                   rel="noreferrer"
                   className="col-span-2 inline-flex items-center justify-center rounded-xl border px-4 py-3 text-sm font-medium"
                 >
-                  Open destination in Google Maps
+                  {selected.customer_lat != null && selected.customer_lng != null
+                    ? "Open exact pin in Google Maps"
+                    : "Open destination in Google Maps"}
                 </a>
               ) : null}
 

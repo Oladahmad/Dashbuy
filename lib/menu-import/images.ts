@@ -14,6 +14,11 @@ function buildGenerationPrompt(item: MenuImportItemDraft) {
   return `Ultra-realistic Nigerian food photography of ${item.name}, plated naturally, commercial food photography, close-up plating, realistic lighting.`;
 }
 
+function isImageGenerationEnabled() {
+  const value = (process.env.MENU_IMPORT_ENABLE_IMAGE_GENERATION || "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
 async function getCachedImage(queryKey: string) {
   const { data, error } = await supabaseAdmin
     .from("menu_image_cache")
@@ -40,7 +45,6 @@ async function setCachedImage(queryKey: string, imageUrl: string, source: ImageC
 async function downloadImage(url: string) {
   const response = await fetch(url);
   if (!response.ok) throw new Error("Image download failed.");
-  const mimeType = response.headers.get("content-type") || "image/jpeg";
   const buffer = Buffer.from(await response.arrayBuffer());
   const normalized = await sharp(buffer)
     .rotate()
@@ -48,6 +52,76 @@ async function downloadImage(url: string) {
     .jpeg({ quality: 86 })
     .toBuffer();
   return { buffer: normalized, mimeType: "image/jpeg" };
+}
+
+async function searchPexelsImage(item: MenuImportItemDraft, vendorId: string) {
+  const apiKey = process.env.PEXELS_API_KEY || "";
+  if (!apiKey) return null;
+
+  const params = new URLSearchParams({
+    query: buildSearchQuery(item),
+    per_page: "8",
+    page: "1",
+  });
+
+  const response = await fetch(`https://api.pexels.com/v1/search?${params.toString()}`, {
+    headers: {
+      Authorization: apiKey,
+    },
+  });
+  const json = (await response.json().catch(() => null)) as
+    | {
+        photos?: Array<{
+          width?: number;
+          height?: number;
+          alt?: string;
+          url?: string;
+          photographer?: string;
+          src?: {
+            original?: string;
+            large2x?: string;
+            large?: string;
+            medium?: string;
+          };
+        }>;
+      }
+    | null;
+
+  if (!response.ok) return null;
+
+  const itemName = item.name.toLowerCase();
+  const candidate = [...(json?.photos ?? [])]
+    .map((entry) => {
+      const alt = cleanText(entry.alt).toLowerCase();
+      const link = cleanText(entry.url).toLowerCase();
+      const photographer = cleanText(entry.photographer).toLowerCase();
+      const text = `${alt} ${link} ${photographer}`;
+      let score = 0;
+      if (text.includes(itemName)) score += 5;
+      if (/nigerian|food|dish|meal|plate|rice|soup|swallow|stew/.test(text)) score += 3;
+      if (/logo|cartoon|watermark|vector|icon|illustration/.test(text)) score -= 10;
+      if ((entry.width ?? 0) >= 1000) score += 2;
+      if ((entry.height ?? 0) >= 1000) score += 2;
+      const imageUrl = entry.src?.large2x || entry.src?.large || entry.src?.original || entry.src?.medium || "";
+      return { imageUrl, score };
+    })
+    .sort((a, b) => b.score - a.score)
+    .find((entry) => entry.score > 0 && entry.imageUrl);
+
+  if (!candidate?.imageUrl) return null;
+
+  const downloaded = await downloadImage(candidate.imageUrl);
+  const publicUrl = await uploadFoodImageFromBuffer({
+    vendorId,
+    buffer: downloaded.buffer,
+    mimeType: downloaded.mimeType,
+    prefix: `pexels-${slugify(item.name) || "food"}`,
+  });
+
+  return {
+    imageUrl: publicUrl,
+    source: "search" as const,
+  };
 }
 
 async function searchGoogleCustomImage(item: MenuImportItemDraft, vendorId: string) {
@@ -124,9 +198,19 @@ async function resolveImageForItem(item: MenuImportItemDraft, vendorId: string) 
   const cached = await getCachedImage(queryKey);
   if (cached) return cached;
 
+  const searchResult =
+    (await withRetry(() => searchPexelsImage(item, vendorId), 1).catch(() => null)) ??
+    (await withRetry(() => searchGoogleCustomImage(item, vendorId), 1).catch(() => null));
+
   const result =
-    (await withRetry(() => searchGoogleCustomImage(item, vendorId), 1).catch(() => null)) ??
-    (await withRetry(() => generateAndUploadImage(item, vendorId), 1));
+    searchResult ??
+    (isImageGenerationEnabled()
+      ? await withRetry(() => generateAndUploadImage(item, vendorId), 1)
+      : null);
+
+  if (!result) {
+    throw new Error("No image provider returned a result.");
+  }
 
   await setCachedImage(queryKey, result.imageUrl, result.source);
   return result;

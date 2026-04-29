@@ -2,6 +2,8 @@ import type { MenuImportCategoryDraft, MenuImportDraft, MenuImportItemDraft } fr
 import { inferBestCategory } from "./category";
 import { buildDescription, clampConfidence, detectDuplicateWarnings, detectPricingType, normalizeName, parsePrice, slugify } from "./utils";
 
+const CATEGORY_REVIEW_ORDER = ["rice-dishes", "proteins", "swallow", "soups", "sides", "pasta", "drinks", "extras", "main"];
+
 function normalizeItem(item: MenuImportItemDraft): MenuImportItemDraft {
   const category = inferBestCategory(item.name, item.categoryName);
   const variants = (item.variants ?? [])
@@ -73,7 +75,7 @@ function getDraftQualityWarnings(categories: MenuImportCategoryDraft[]) {
         });
       }
 
-      if (item.pricingType !== "variant" && (item.price ?? 0) <= 0) {
+      if (item.platformCategory !== "soup" && item.pricingType !== "variant" && (item.price ?? 0) <= 0) {
         warnings.push({
           code: "missing_price",
           severity: "high",
@@ -121,7 +123,18 @@ export function normalizeMenuDraft(draft: MenuImportDraft): MenuImportDraft {
     }
   }
 
-  const categories = Array.from(grouped.values()).filter((category) => category.items.length > 0);
+  const categories = Array.from(grouped.values())
+    .filter((category) => category.items.length > 0)
+    .sort((a, b) => {
+      const aKey = slugify(a.name);
+      const bKey = slugify(b.name);
+      const aIndex = CATEGORY_REVIEW_ORDER.indexOf(aKey);
+      const bIndex = CATEGORY_REVIEW_ORDER.indexOf(bKey);
+      if (aIndex === -1 && bIndex === -1) return a.name.localeCompare(b.name);
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    });
   const warnings = [...(draft.warnings ?? []), ...getDraftQualityWarnings(categories)];
   const dedupedWarnings = new Map<string, MenuImportDraft["warnings"][number]>();
 

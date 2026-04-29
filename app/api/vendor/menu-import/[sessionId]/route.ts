@@ -35,9 +35,15 @@ export async function GET(req: Request, context: { params: Promise<{ sessionId: 
       warnings: data.warnings ?? [],
     });
   } catch (error) {
+    const status =
+      error instanceof Error && error.name === "AuthError"
+        ? 401
+        : error instanceof Error && error.name === "RoleError"
+          ? 403
+          : 500;
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Unexpected session fetch error." },
-      { status: 500 }
+      { status }
     );
   }
 }
@@ -64,9 +70,15 @@ export async function PATCH(req: Request, context: { params: Promise<{ sessionId
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true, draft: normalizedDraft });
   } catch (error) {
+    const status =
+      error instanceof Error && error.name === "AuthError"
+        ? 401
+        : error instanceof Error && error.name === "RoleError"
+          ? 403
+          : 500;
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Unexpected draft save error." },
-      { status: 500 }
+      { status }
     );
   }
 }

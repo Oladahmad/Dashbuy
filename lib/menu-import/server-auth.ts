@@ -10,11 +10,17 @@ export type VendorActor = {
 export async function requireVendorActor(req: Request): Promise<VendorActor> {
   const authHeader = req.headers.get("authorization") || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-  if (!token) throw new Error("Missing Authorization Bearer token");
+  if (!token) {
+    const error = new Error("Missing Authorization Bearer token");
+    error.name = "AuthError";
+    throw error;
+  }
 
   const { data, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !data.user) {
-    throw new Error("Invalid session");
+    const authError = new Error("Invalid session");
+    authError.name = "AuthError";
+    throw authError;
   }
 
   const { data: profile, error: profileError } = await supabaseAdmin
@@ -26,7 +32,11 @@ export async function requireVendorActor(req: Request): Promise<VendorActor> {
   if (profileError) throw new Error("Profile error: " + profileError.message);
 
   const role = (profile?.role ?? "customer").toLowerCase();
-  if (role !== "vendor_food" && role !== "admin") throw new Error("Vendor access required");
+  if (role !== "vendor_food" && role !== "admin") {
+    const roleError = new Error("Vendor access required");
+    roleError.name = "RoleError";
+    throw roleError;
+  }
 
   return {
     userId: data.user.id,
