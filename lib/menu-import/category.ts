@@ -20,10 +20,10 @@ function isPepperSoupLike(value: string) {
   return /\bpepper soup\b/.test(lower) || lower === "pepper" || /\bpepper\b/.test(lower);
 }
 
-function findMatchedCategory(value: string) {
+function findMatchedCategory(value: string): { label: string; platformCategory: PlatformFoodCategory } | null {
   const haystack = cleanText(value).toLowerCase();
   if (isPepperSoupLike(haystack)) {
-    return { label: "Soups", platformCategory: "soup" satisfies PlatformFoodCategory };
+    return { label: "Soups", platformCategory: "soup" };
   }
   return CUSTOM_CATEGORY_LABELS.find((entry) => entry.match.some((term) => haystack.includes(term))) ?? null;
 }
@@ -37,7 +37,7 @@ function canonicalizeRawCategory(rawCategory: string) {
   };
 }
 
-export function inferPlatformCategory(name: string, rawCategory: string) {
+export function inferPlatformCategory(name: string, rawCategory: string): PlatformFoodCategory {
   const haystack = `${cleanText(name)} ${cleanText(rawCategory)}`.toLowerCase();
   const explicitNameMatch = findMatchedCategory(name);
   if (explicitNameMatch) return explicitNameMatch.platformCategory;

@@ -211,8 +211,7 @@ export async function GET(req: Request) {
       })
       .filter((j) => !j.hideFromLogistics)
       .map((j) => {
-        const next = { ...j };
-        delete next.hideFromLogistics;
+        const { hideFromLogistics: _hideFromLogistics, ...next } = j;
         return next;
       });
 
