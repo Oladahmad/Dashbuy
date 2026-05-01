@@ -161,8 +161,7 @@ export default function VendorDashboardPage() {
         .from("orders")
         .select("*")
         .eq("vendor_id", vendorId)
-        .order("created_at", { ascending: false })
-        .limit(20);
+        .order("created_at", { ascending: false });
 
       const ordersRows = (o ?? []) as UnknownRow[];
       const orderIds = ordersRows

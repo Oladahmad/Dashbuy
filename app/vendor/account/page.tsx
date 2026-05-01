@@ -419,6 +419,104 @@ export default function VendorAccountPage() {
     }));
   }
 
+  type StoreHoursGroup = {
+    enabled: boolean;
+    open: string;
+    close: string;
+  };
+
+  function createGroupedStoreHours(weekdays: StoreHoursGroup, saturday: StoreHoursGroup, sunday: StoreHoursGroup): StoreHours {
+    const hours = emptyStoreHours();
+    const weekdayKeys: StoreDayKey[] = ["mon", "tue", "wed", "thu", "fri"];
+    for (const day of weekdayKeys) {
+      hours[day] = {
+        enabled: weekdays.enabled,
+        open: weekdays.enabled ? weekdays.open : "",
+        close: weekdays.enabled ? weekdays.close : "",
+      };
+    }
+    hours.sat = {
+      enabled: saturday.enabled,
+      open: saturday.enabled ? saturday.open : "",
+      close: saturday.enabled ? saturday.close : "",
+    };
+    hours.sun = {
+      enabled: sunday.enabled,
+      open: sunday.enabled ? sunday.open : "",
+      close: sunday.enabled ? sunday.close : "",
+    };
+    return hours;
+  }
+
+  function deriveGroupedStoreHours(hours: StoreHours) {
+    const weekdayKeys: StoreDayKey[] = ["mon", "tue", "wed", "thu", "fri"];
+    const firstWeekday = hours.mon;
+    const weekdaysSame = weekdayKeys.every(
+      (day) =>
+        hours[day].enabled === firstWeekday.enabled &&
+        hours[day].open === firstWeekday.open &&
+        hours[day].close === firstWeekday.close
+    );
+
+    const weekdays: StoreHoursGroup = {
+      enabled: weekdaysSame && firstWeekday.enabled && !!firstWeekday.open && !!firstWeekday.close,
+      open: firstWeekday.open || DEFAULT_OPEN_TIME,
+      close: firstWeekday.close || DEFAULT_CLOSE_TIME,
+    };
+
+    const saturday: StoreHoursGroup = {
+      enabled: hours.sat.enabled && !!hours.sat.open && !!hours.sat.close,
+      open: hours.sat.open || DEFAULT_OPEN_TIME,
+      close: hours.sat.close || DEFAULT_CLOSE_TIME,
+    };
+
+    const sunday: StoreHoursGroup = {
+      enabled: hours.sun.enabled && !!hours.sun.open && !!hours.sun.close,
+      open: hours.sun.open || DEFAULT_OPEN_TIME,
+      close: hours.sun.close || DEFAULT_CLOSE_TIME,
+    };
+
+    return { weekdays, saturday, sunday };
+  }
+
+  function getHoursSummary(hours: StoreHours) {
+    const weekdayKeys: StoreDayKey[] = ["mon", "tue", "wed", "thu", "fri"];
+    const weekday = hours.mon;
+    const saturday = hours.sat;
+    const sunday = hours.sun;
+
+    const weekdaysSame = weekdayKeys.every(
+      (day) =>
+        hours[day].enabled === weekday.enabled &&
+        hours[day].open === weekday.open &&
+        hours[day].close === weekday.close
+    );
+
+    if (
+      weekday.enabled &&
+      saturday.enabled &&
+      sunday.enabled &&
+      weekdaysSame &&
+      weekday.open === saturday.open &&
+      weekday.open === sunday.open &&
+      weekday.close === saturday.close &&
+      weekday.close === sunday.close
+    ) {
+      return [`Daily: ${formatStoreTime(weekday.open)} - ${formatStoreTime(weekday.close)}`];
+    }
+
+    const hasAnySchedule = weekday.enabled || saturday.enabled || sunday.enabled;
+    if (!hasAnySchedule) {
+      return [`Default: ${formatStoreTime(DEFAULT_OPEN_TIME)} - ${formatStoreTime(DEFAULT_CLOSE_TIME)} daily`];
+    }
+
+    return [
+      weekday.enabled ? `Weekdays: ${formatStoreTime(weekday.open)} - ${formatStoreTime(weekday.close)}` : "Weekdays: Closed",
+      saturday.enabled ? `Saturday: ${formatStoreTime(saturday.open)} - ${formatStoreTime(saturday.close)}` : "Saturday: Closed",
+      sunday.enabled ? `Sunday: ${formatStoreTime(sunday.open)} - ${formatStoreTime(sunday.close)}` : "Sunday: Closed",
+    ];
+  }
+
   async function saveAvailabilityPatch(patch: Partial<ProfileRow> & { store_hours_json?: StoreHours | null }) {
     if (!profile) return;
     setAvailabilitySaving(true);
@@ -448,12 +546,14 @@ export default function VendorAccountPage() {
   }
 
   function openHoursModal() {
-    setHoursDraft(normalizeStoreHours(storeHours));
+    const groups = deriveGroupedStoreHours(storeHours);
+    setHoursDraft(createGroupedStoreHours(groups.weekdays, groups.saturday, groups.sunday));
     setHoursModalOpen(true);
   }
 
   function closeHoursModal() {
-    setHoursDraft(normalizeStoreHours(storeHours));
+    const groups = deriveGroupedStoreHours(storeHours);
+    setHoursDraft(createGroupedStoreHours(groups.weekdays, groups.saturday, groups.sunday));
     setHoursModalOpen(false);
   }
 
@@ -462,13 +562,7 @@ export default function VendorAccountPage() {
     setHoursModalOpen(false);
   }
 
-  const hoursSummary = hasCustomStoreHours
-    ? STORE_DAY_KEYS.map((day) => {
-        const row = storeHours[day];
-        if (!row.enabled || !row.open || !row.close) return `${dayLabel(day)}: Closed`;
-        return `${dayLabel(day)}: ${formatStoreTime(row.open)} - ${formatStoreTime(row.close)}`;
-      })
-    : [`Default: ${formatStoreTime(DEFAULT_OPEN_TIME)} - ${formatStoreTime(DEFAULT_CLOSE_TIME)} daily`];
+  const hoursSummary = getHoursSummary(storeHours);
 
   return (
     <div className="space-y-4">
@@ -679,12 +773,12 @@ export default function VendorAccountPage() {
                       <button
                         type="button"
                         className={`rounded-full px-4 py-2 text-sm font-medium disabled:opacity-60 ${
-                          isStoreOpen ? "bg-emerald-600 text-white" : "bg-gray-200 text-gray-800"
+                          isStoreOpen ? "bg-red-600 text-white" : "bg-emerald-600 text-white"
                         }`}
                         onClick={() => saveAvailabilityPatch({ is_store_open: !isStoreOpen })}
                         disabled={availabilitySaving}
                       >
-                        {availabilitySaving ? "Saving..." : isStoreOpen ? "Open" : "Closed"}
+                        {availabilitySaving ? "Saving..." : isStoreOpen ? "Close restaurant" : "Open restaurant"}
                       </button>
                     </div>
                   </div>
@@ -721,11 +815,11 @@ export default function VendorAccountPage() {
                       <button
                         type="button"
                         className={`rounded-full px-4 py-2 text-sm font-medium ${
-                          isStoreOpen ? "bg-emerald-600 text-white" : "bg-gray-200 text-gray-800"
+                          isStoreOpen ? "bg-red-600 text-white" : "bg-emerald-600 text-white"
                         }`}
                         onClick={() => setIsStoreOpen((prev) => !prev)}
                       >
-                        {isStoreOpen ? "Open" : "Closed"}
+                        {isStoreOpen ? "Close restaurant" : "Open restaurant"}
                       </button>
                     </div>
                   </div>
@@ -845,7 +939,7 @@ export default function VendorAccountPage() {
 
       {hoursModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center" onClick={closeHoursModal}>
-          <div className="w-full max-w-2xl rounded-2xl bg-white p-4 sm:p-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+          <div className="w-full max-w-[90vw] sm:max-w-lg rounded-2xl bg-white p-4 sm:p-5 max-h-[85vh] overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-lg font-semibold">Set opening and closing time</p>
@@ -856,32 +950,29 @@ export default function VendorAccountPage() {
               </button>
             </div>
 
-            <div className="mt-4 space-y-3">
-              {STORE_DAY_KEYS.map((day) => {
-                const row = hoursDraft[day];
-                return (
-                  <div key={day} className="rounded-2xl border p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium">{dayLabel(day)}</p>
-                      <label className="flex items-center gap-2 text-xs text-gray-600">
-                        <input
-                          type="checkbox"
-                          checked={row.enabled}
-                          onChange={(e) => updateStoreDay("draft", day, { enabled: e.target.checked })}
-                          disabled={availabilitySaving}
-                        />
-                        Set this day
-                      </label>
-                    </div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="mt-4 overflow-y-auto max-h-[72vh] pr-1">
+              <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="rounded-2xl border p-4">
+                    <p className="text-sm font-medium text-gray-900">Weekdays</p>
+                    <p className="mt-1 text-xs text-gray-500">Mon–Fri schedule</p>
+                    <div className="mt-3 space-y-3">
                       <div>
                         <label className="text-xs text-gray-600">Open</label>
                         <input
                           type="time"
                           className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
-                          value={row.open}
-                          onChange={(e) => updateStoreDay("draft", day, { open: e.target.value })}
-                          disabled={!row.enabled || availabilitySaving}
+                          value={hoursDraft.mon.open}
+                          onChange={(e) =>
+                            setHoursDraft(
+                              createGroupedStoreHours(
+                                { enabled: hoursDraft.mon.enabled, open: e.target.value, close: hoursDraft.mon.close },
+                                { enabled: hoursDraft.sat.enabled, open: hoursDraft.sat.open, close: hoursDraft.sat.close },
+                                { enabled: hoursDraft.sun.enabled, open: hoursDraft.sun.open, close: hoursDraft.sun.close }
+                              )
+                            )
+                          }
+                          disabled={availabilitySaving}
                         />
                       </div>
                       <div>
@@ -889,16 +980,160 @@ export default function VendorAccountPage() {
                         <input
                           type="time"
                           className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
-                          value={row.close}
-                          onChange={(e) => updateStoreDay("draft", day, { close: e.target.value })}
-                          disabled={!row.enabled || availabilitySaving}
+                          value={hoursDraft.mon.close}
+                          onChange={(e) =>
+                            setHoursDraft(
+                              createGroupedStoreHours(
+                                { enabled: hoursDraft.mon.enabled, open: hoursDraft.mon.open, close: e.target.value },
+                                { enabled: hoursDraft.sat.enabled, open: hoursDraft.sat.open, close: hoursDraft.sat.close },
+                                { enabled: hoursDraft.sun.enabled, open: hoursDraft.sun.open, close: hoursDraft.sun.close }
+                              )
+                            )
+                          }
+                          disabled={availabilitySaving}
                         />
                       </div>
+                      <label className="flex items-center gap-2 text-sm text-gray-600">
+                        <input
+                          type="checkbox"
+                          checked={hoursDraft.mon.enabled}
+                          onChange={(e) =>
+                            setHoursDraft(
+                              createGroupedStoreHours(
+                                { enabled: e.target.checked, open: hoursDraft.mon.open, close: hoursDraft.mon.close },
+                                { enabled: hoursDraft.sat.enabled, open: hoursDraft.sat.open, close: hoursDraft.sat.close },
+                                { enabled: hoursDraft.sun.enabled, open: hoursDraft.sun.open, close: hoursDraft.sun.close }
+                              )
+                            )
+                          }
+                          disabled={availabilitySaving}
+                        />
+                        Use weekdays schedule
+                      </label>
                     </div>
                   </div>
-                );
-              })}
-            </div>
+
+                  <div className="rounded-2xl border p-4">
+                    <p className="text-sm font-medium text-gray-900">Saturday</p>
+                    <p className="mt-1 text-xs text-gray-500">Saturday schedule</p>
+                    <div className="mt-3 space-y-3">
+                      <div>
+                        <label className="text-xs text-gray-600">Open</label>
+                        <input
+                          type="time"
+                          className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                          value={hoursDraft.sat.open}
+                          onChange={(e) =>
+                            setHoursDraft(
+                              createGroupedStoreHours(
+                                { enabled: hoursDraft.mon.enabled, open: hoursDraft.mon.open, close: hoursDraft.mon.close },
+                                { enabled: hoursDraft.sat.enabled, open: e.target.value, close: hoursDraft.sat.close },
+                                { enabled: hoursDraft.sun.enabled, open: hoursDraft.sun.open, close: hoursDraft.sun.close }
+                              )
+                            )
+                          }
+                          disabled={availabilitySaving}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-600">Close</label>
+                        <input
+                          type="time"
+                          className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                          value={hoursDraft.sat.close}
+                          onChange={(e) =>
+                            setHoursDraft(
+                              createGroupedStoreHours(
+                                { enabled: hoursDraft.mon.enabled, open: hoursDraft.mon.open, close: hoursDraft.mon.close },
+                                { enabled: hoursDraft.sat.enabled, open: hoursDraft.sat.open, close: e.target.value },
+                                { enabled: hoursDraft.sun.enabled, open: hoursDraft.sun.open, close: hoursDraft.sun.close }
+                              )
+                            )
+                          }
+                          disabled={availabilitySaving}
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 text-sm text-gray-600">
+                        <input
+                          type="checkbox"
+                          checked={hoursDraft.sat.enabled}
+                          onChange={(e) =>
+                            setHoursDraft(
+                              createGroupedStoreHours(
+                                { enabled: hoursDraft.mon.enabled, open: hoursDraft.mon.open, close: hoursDraft.mon.close },
+                                { enabled: e.target.checked, open: hoursDraft.sat.open, close: hoursDraft.sat.close },
+                                { enabled: hoursDraft.sun.enabled, open: hoursDraft.sun.open, close: hoursDraft.sun.close }
+                              )
+                            )
+                          }
+                          disabled={availabilitySaving}
+                        />
+                        Use Saturday schedule
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border p-4">
+                    <p className="text-sm font-medium text-gray-900">Sunday</p>
+                    <p className="mt-1 text-xs text-gray-500">Sunday schedule</p>
+                    <div className="mt-3 space-y-3">
+                      <div>
+                        <label className="text-xs text-gray-600">Open</label>
+                        <input
+                          type="time"
+                          className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                          value={hoursDraft.sun.open}
+                          onChange={(e) =>
+                            setHoursDraft(
+                              createGroupedStoreHours(
+                                { enabled: hoursDraft.mon.enabled, open: hoursDraft.mon.open, close: hoursDraft.mon.close },
+                                { enabled: hoursDraft.sat.enabled, open: hoursDraft.sat.open, close: hoursDraft.sat.close },
+                                { enabled: hoursDraft.sun.enabled, open: e.target.value, close: hoursDraft.sun.close }
+                              )
+                            )
+                          }
+                          disabled={availabilitySaving}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-600">Close</label>
+                        <input
+                          type="time"
+                          className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                          value={hoursDraft.sun.close}
+                          onChange={(e) =>
+                            setHoursDraft(
+                              createGroupedStoreHours(
+                                { enabled: hoursDraft.mon.enabled, open: hoursDraft.mon.open, close: hoursDraft.mon.close },
+                                { enabled: hoursDraft.sat.enabled, open: hoursDraft.sat.open, close: hoursDraft.sat.close },
+                                { enabled: hoursDraft.sun.enabled, open: hoursDraft.sun.open, close: e.target.value }
+                              )
+                            )
+                          }
+                          disabled={availabilitySaving}
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 text-sm text-gray-600">
+                        <input
+                          type="checkbox"
+                          checked={hoursDraft.sun.enabled}
+                          onChange={(e) =>
+                            setHoursDraft(
+                              createGroupedStoreHours(
+                                { enabled: hoursDraft.mon.enabled, open: hoursDraft.mon.open, close: hoursDraft.mon.close },
+                                { enabled: hoursDraft.sat.enabled, open: hoursDraft.sat.open, close: hoursDraft.sat.close },
+                                { enabled: e.target.checked, open: hoursDraft.sun.open, close: hoursDraft.sun.close }
+                              )
+                            )
+                          }
+                          disabled={availabilitySaving}
+                        />
+                        Use Sunday schedule
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
             <div className="mt-4 flex flex-col gap-2 sm:flex-row">
               <button
@@ -920,6 +1155,7 @@ export default function VendorAccountPage() {
             </div>
           </div>
         </div>
+      </div>
       ) : null}
     </div>
   );

@@ -75,6 +75,14 @@ function getDraftQualityWarnings(categories: MenuImportCategoryDraft[]) {
         });
       }
 
+      if (item.pricingType === "variant" && item.variants.some((v) => (parsePrice(v.price) ?? 0) <= 0)) {
+        warnings.push({
+          code: "missing_variant_prices",
+          severity: "high",
+          message: `${item.name || "An item"} has variants with missing or invalid prices.`,
+        });
+      }
+
       if (item.platformCategory !== "soup" && item.pricingType !== "variant" && (item.price ?? 0) <= 0) {
         warnings.push({
           code: "missing_price",
