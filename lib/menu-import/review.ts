@@ -3,6 +3,13 @@ import { inferBestCategory } from "./category";
 import { buildDescription, clampConfidence, detectDuplicateWarnings, detectPricingType, normalizeName, parsePrice, slugify } from "./utils";
 
 const CATEGORY_REVIEW_ORDER = ["rice-dishes", "proteins", "swallow", "soups", "sides", "pasta", "drinks", "extras", "main"];
+const RECOMPUTED_WARNING_CODES = new Set([
+  "missing_item_name",
+  "missing_variant_rows",
+  "missing_item_price",
+  "low_confidence_item",
+  "duplicate_menu_items",
+]);
 
 function normalizeItem(item: MenuImportItemDraft): MenuImportItemDraft {
   const category = inferBestCategory(item.name, item.categoryName);
@@ -17,6 +24,27 @@ function normalizeItem(item: MenuImportItemDraft): MenuImportItemDraft {
     .filter((variant) => variant.name && variant.price > 0)
     .sort((a, b) => a.price - b.price);
 
+  let pricingType = detectPricingType({
+    categoryName: category.categoryName,
+    platformCategory: category.platformCategory,
+    name: item.name.trim(),
+    description: item.description.trim(),
+    notes: item.notes.trim(),
+    foodType: item.foodType,
+    pricingType: item.pricingType,
+    variants,
+    comboParts: (item.comboParts ?? []).map((part) => part.trim()).filter(Boolean),
+    addOns: (item.addOns ?? []).map((part) => part.trim()).filter(Boolean),
+    price: parsePrice(item.price),
+    unitLabel: item.unitLabel?.trim() || null,
+    sourceConfidence: clampConfidence(item.sourceConfidence),
+  });
+
+  // If pricingType is "variant" but there are no valid variants, fall back to fixed pricing
+  if (pricingType === "variant" && variants.length === 0) {
+    pricingType = "fixed";
+  }
+
   const normalized: MenuImportItemDraft = {
     ...item,
     name: item.name.trim(),
@@ -24,21 +52,7 @@ function normalizeItem(item: MenuImportItemDraft): MenuImportItemDraft {
     notes: item.notes.trim(),
     categoryName: category.categoryName,
     platformCategory: category.platformCategory,
-    pricingType: detectPricingType({
-      categoryName: category.categoryName,
-      platformCategory: category.platformCategory,
-      name: item.name.trim(),
-      description: item.description.trim(),
-      notes: item.notes.trim(),
-      foodType: item.foodType,
-      pricingType: item.pricingType,
-      variants,
-      comboParts: (item.comboParts ?? []).map((part) => part.trim()).filter(Boolean),
-      addOns: (item.addOns ?? []).map((part) => part.trim()).filter(Boolean),
-      price: parsePrice(item.price),
-      unitLabel: item.unitLabel?.trim() || null,
-      sourceConfidence: clampConfidence(item.sourceConfidence),
-    }),
+    pricingType,
     price: parsePrice(item.price),
     unitLabel: item.unitLabel?.trim() || null,
     variants,
@@ -52,6 +66,16 @@ function normalizeItem(item: MenuImportItemDraft): MenuImportItemDraft {
 
   if (normalized.pricingType === "variant") normalized.price = null;
   return normalized;
+}
+
+function requiresExplicitPrice(item: MenuImportItemDraft) {
+  if (item.pricingType === "variant") return false;
+  if (item.platformCategory === "soup" && item.foodType === "single") return false;
+  return true;
+}
+
+function hasValidPrice(item: MenuImportItemDraft) {
+  return (parsePrice(item.price) ?? 0) > 0;
 }
 
 function getDraftQualityWarnings(categories: MenuImportCategoryDraft[]) {
@@ -75,17 +99,9 @@ function getDraftQualityWarnings(categories: MenuImportCategoryDraft[]) {
         });
       }
 
-      if (item.pricingType === "variant" && item.variants.some((v) => (parsePrice(v.price) ?? 0) <= 0)) {
+      if (requiresExplicitPrice(item) && !hasValidPrice(item)) {
         warnings.push({
-          code: "missing_variant_prices",
-          severity: "high",
-          message: `${item.name || "An item"} has variants with missing or invalid prices.`,
-        });
-      }
-
-      if (item.platformCategory !== "soup" && item.pricingType !== "variant" && (item.price ?? 0) <= 0) {
-        warnings.push({
-          code: "missing_price",
+          code: "missing_item_price",
           severity: "high",
           message: `${item.name || "An item"} is missing a valid price.`,
         });
@@ -135,7 +151,8 @@ export function normalizeMenuDraft(draft: MenuImportDraft): MenuImportDraft {
       if (bIndex === -1) return -1;
       return aIndex - bIndex;
     });
-  const warnings = [...(draft.warnings ?? []), ...getDraftQualityWarnings(categories)];
+  const persistedWarnings = (draft.warnings ?? []).filter((warning) => !RECOMPUTED_WARNING_CODES.has(warning.code));
+  const warnings = [...persistedWarnings, ...getDraftQualityWarnings(categories)];
   const dedupedWarnings = new Map<string, MenuImportDraft["warnings"][number]>();
 
   for (const warning of [...warnings, ...detectDuplicateWarnings({ ...draft, categories, warnings: [] })]) {

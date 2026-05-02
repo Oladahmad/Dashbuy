@@ -89,7 +89,10 @@ export async function publishMenuDraft(sessionId: string, vendorId: string, draf
         food_type: item.foodType,
         category: item.platformCategory,
         pricing_type: item.pricingType,
-        price: item.pricingType === "variant" ? 0 : parsePrice(item.price) ?? 0,
+        price:
+          item.pricingType === "fixed"
+            ? parsePrice(item.price) ?? 0
+            : 0,
         unit_price: item.pricingType === "per_scoop" || item.pricingType === "per_unit" ? parsePrice(item.price) ?? 0 : null,
         unit_label: item.unitLabel,
         short_description: cleanText(item.description) || null,

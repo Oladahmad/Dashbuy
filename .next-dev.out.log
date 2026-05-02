@@ -1,0 +1,16 @@
+
+> dashbuy@1.0 dev
+> next dev --webpack
+
+▲ Next.js 16.1.3 (webpack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.116.43:3000
+- Environments: .env.local
+
+✓ Starting...
+✓ Ready in 10.8s
+○ Compiling /vendor/food/import ...
+ GET /vendor/food/import 500 in 29.1s (compile: 27.9s, render: 1244ms)
+ GET /vendor/food/import 500 in 185ms (compile: 158ms, render: 27ms)
+ GET /vendor/food/import 200 in 5.0s (compile: 1854ms, render: 3.1s)
+○ Compiling /manifest.webmanifest ...

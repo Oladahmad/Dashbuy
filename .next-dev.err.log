@@ -1,0 +1,73 @@
+⨯ ./app/vendor/food/import/page.tsx
+Error:   x `ssr: false` is not allowed with `next/dynamic` in Server Components. Please move it into a Client Component.
+   ,-[C:\Users\AHMAD\Desktop\dashbuy\app\vendor\food\import\page.tsx:3:1]
+ 1 |     import dynamic from "next/dynamic";
+ 2 |     
+ 3 | ,-> const SmartMenuImportClient = dynamic(() => import("@/components/vendor/SmartMenuImportClient"), {
+ 4 | |     ssr: false,
+ 5 | `-> });
+ 6 |     
+ 7 |     export default function VendorFoodImportPage() {
+ 8 |       return <SmartMenuImportClient />;
+   `----
+
+Import trace for requested module:
+./app/vendor/food/import/page.tsx
+⨯ ./app/vendor/food/import/page.tsx
+Error:   x `ssr: false` is not allowed with `next/dynamic` in Server Components. Please move it into a Client Component.
+   ,-[C:\Users\AHMAD\Desktop\dashbuy\app\vendor\food\import\page.tsx:3:1]
+ 1 |     import dynamic from "next/dynamic";
+ 2 |     
+ 3 | ,-> const SmartMenuImportClient = dynamic(() => import("@/components/vendor/SmartMenuImportClient"), {
+ 4 | |     ssr: false,
+ 5 | `-> });
+ 6 |     
+ 7 |     export default function VendorFoodImportPage() {
+ 8 |       return <SmartMenuImportClient />;
+   `----
+
+Import trace for requested module:
+./app/vendor/food/import/page.tsx
+⨯ ./app/vendor/food/import/page.tsx
+Error:   x `ssr: false` is not allowed with `next/dynamic` in Server Components. Please move it into a Client Component.
+   ,-[C:\Users\AHMAD\Desktop\dashbuy\app\vendor\food\import\page.tsx:3:1]
+ 1 |     import dynamic from "next/dynamic";
+ 2 |     
+ 3 | ,-> const SmartMenuImportClient = dynamic(() => import("@/components/vendor/SmartMenuImportClient"), {
+ 4 | |     ssr: false,
+ 5 | `-> });
+ 6 |     
+ 7 |     export default function VendorFoodImportPage() {
+ 8 |       return <SmartMenuImportClient />;
+   `----
+
+Import trace for requested module:
+./app/vendor/food/import/page.tsx
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+⨯ ./app/vendor/food/import/page.tsx
+Error:   x Unterminated string constant
+   ,-[C:\Users\AHMAD\Desktop\dashbuy\app\vendor\food\import\page.tsx:1:1]
+ 1 | \"use client\";
+   :  ^^^^^^^^^^^^^^
+ 2 | 
+ 3 | import dynamic from "next/dynamic";
+   `----
+  x Expected unicode escape
+   ,-[C:\Users\AHMAD\Desktop\dashbuy\app\vendor\food\import\page.tsx:1:1]
+ 1 | \"use client\";
+   : ^
+ 2 | 
+ 3 | import dynamic from "next/dynamic";
+   `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./app/vendor/food/import/page.tsx
+⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
