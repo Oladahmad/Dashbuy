@@ -38,3 +38,25 @@
  POST /api/vendor/menu-import/a904920a-92d1-46d1-891f-2f7a705abe57/publish 200 in 18.2s (compile: 18ms, render: 18.1s)
  GET /vendor/food 200 in 3.6s (compile: 3.3s, render: 223ms)
  GET /manifest.webmanifest 200 in 2.0s (compile: 2.0s, render: 31ms)
+ GET /vendor/food 200 in 3.2s (compile: 2.8s, render: 405ms)
+ GET /manifest.webmanifest 200 in 4.0s (compile: 3.9s, render: 62ms)
+ GET /vendor/food/import 200 in 349ms (compile: 206ms, render: 143ms)
+ GET /manifest.webmanifest 200 in 26ms (compile: 12ms, render: 14ms)
+○ Compiling /api/vendor/menu-import ...
+ GET /vendor/food/import 200 in 5.2s (compile: 4.4s, render: 802ms)
+ POST /api/vendor/menu-import 200 in 37.6s (compile: 24.0s, render: 13.5s)
+ GET /manifest.webmanifest 200 in 67ms (compile: 43ms, render: 24ms)
+ GET /vendor/food/import 200 in 6.2s (compile: 5.7s, render: 440ms)
+ GET /manifest.webmanifest 200 in 95ms (compile: 62ms, render: 33ms)
+○ Compiling /api/vendor/menu-import ...
+ POST /api/vendor/menu-import 200 in 17.6s (compile: 6.3s, render: 11.3s)
+ GET /manifest.webmanifest 200 in 43ms (compile: 25ms, render: 18ms)
+ GET /vendor/food/import 200 in 791ms (compile: 636ms, render: 155ms)
+ GET /manifest.webmanifest 200 in 64ms (compile: 40ms, render: 24ms)
+ POST /api/vendor/menu-import 200 in 13.4s (compile: 5.4s, render: 8.0s)
+ GET /vendor/food/import 200 in 1593ms (compile: 1272ms, render: 321ms)
+ GET /manifest.webmanifest 200 in 3.7s (compile: 3.7s, render: 57ms)
+○ Compiling /api/vendor/menu-import ...
+ POST /api/vendor/menu-import 200 in 13.3s (compile: 7.0s, render: 6.3s)
+○ Compiling /api/vendor/menu-import/[sessionId]/publish ...
+ POST /api/vendor/menu-import/3dd1c376-48c3-4931-b179-8e211ad5705d/publish 500 in 5.5s (compile: 4.3s, render: 1158ms)

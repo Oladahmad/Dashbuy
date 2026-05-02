@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import type { MenuImportDraft, MenuImportItemDraft } from "@/lib/menu-import/types";
@@ -110,6 +110,26 @@ function isNoVariantPreset(value: string) {
   return value === "none";
 }
 
+type ImportFieldError = {
+  itemId: string;
+  field: "name" | "price" | "variant";
+  message: string;
+};
+
+function needsExplicitPrice(item: MenuImportItemDraft) {
+  if (item.pricingType === "variant") return false;
+  if (item.platformCategory === "soup" && item.foodType === "single") return false;
+  return true;
+}
+
+function hasBlockingIssue(item: MenuImportItemDraft) {
+  if (!item.name.trim()) return true;
+  if (item.pricingType === "variant") {
+    return item.variants.filter((variant) => variant.name.trim() && Number(variant.price) > 0).length === 0;
+  }
+  return needsExplicitPrice(item) && !(Number(item.price) > 0);
+}
+
 export default function SmartMenuImportClient() {
   const router = useRouter();
   const [dragging, setDragging] = useState(false);
@@ -122,16 +142,68 @@ export default function SmartMenuImportClient() {
   const [publishing, setPublishing] = useState(false);
   const [publishState, setPublishState] = useState<"idle" | "publishing" | "published">("idle");
   const [variantPresetCount, setVariantPresetCount] = useState<Record<string, string>>({});
+  const [fieldError, setFieldError] = useState<ImportFieldError | null>(null);
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const totalItems = useMemo(() => (draft ? flattenItems(draft).length : 0), [draft]);
 
-  async function getAccessToken() {
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (sessionData.session?.access_token) {
-      return sessionData.session.access_token;
+  function scrollToItem(itemId: string) {
+    const node = itemRefs.current[itemId];
+    if (!node) return;
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+    const firstInput = node.querySelector("input, select, textarea") as HTMLElement | null;
+    firstInput?.focus();
+  }
+
+  function findFirstBlockingItem(currentDraft: MenuImportDraft) {
+    for (const { item } of flattenItems(currentDraft)) {
+      if (hasBlockingIssue(item)) return item;
+    }
+    return null;
+  }
+
+  function buildFieldError(item: MenuImportItemDraft, fallbackMessage?: string): ImportFieldError {
+    if (!item.name.trim()) {
+      return {
+        itemId: item.id,
+        field: "name",
+        message: fallbackMessage ?? "Enter an item name.",
+      };
     }
 
-    const refreshed = await supabase.auth.refreshSession();
-    return refreshed.data.session?.access_token ?? "";
+    if (item.pricingType === "variant") {
+      return {
+        itemId: item.id,
+        field: "variant",
+        message: fallbackMessage ?? "Add at least one variant with a valid price.",
+      };
+    }
+
+    return {
+      itemId: item.id,
+      field: "price",
+      message: fallbackMessage ?? "Enter a valid price for this item.",
+    };
+  }
+
+  function findItemMatchingError(currentDraft: MenuImportDraft, errorMessage: string) {
+    const lower = errorMessage.toLowerCase();
+    return flattenItems(currentDraft).find(({ item }) => item.name.trim() && lower.includes(item.name.trim().toLowerCase()))?.item ?? null;
+  }
+
+  async function getAccessToken() {
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (sessionData.session?.access_token) {
+        return sessionData.session.access_token;
+      }
+
+      const refreshed = await supabase.auth.refreshSession();
+      if (refreshed.error) throw refreshed.error;
+      return refreshed.data.session?.access_token ?? "";
+    } catch {
+      return "";
+    }
   }
 
   async function uploadFile(file: File) {
@@ -149,45 +221,61 @@ export default function SmartMenuImportClient() {
     const formData = new FormData();
     formData.append("file", file);
 
-    await new Promise<void>((resolve) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/vendor/menu-import");
-      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-          setProgress(Math.min(95, Math.round((event.loaded / event.total) * 100)));
-        }
-      };
+    try {
+      await new Promise<void>((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/api/vendor/menu-import");
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            setProgress(Math.min(95, Math.round((event.loaded / event.total) * 100)));
+          }
+        };
         xhr.onload = () => {
           setUploading(false);
           setProgress(100);
           const body = JSON.parse(xhr.responseText || "{}") as {
             ok?: boolean;
-          error?: string;
-          sessionId?: string;
-          draft?: MenuImportDraft;
-        };
+            error?: string;
+            sessionId?: string;
+            draft?: MenuImportDraft;
+          };
           if (xhr.status >= 200 && xhr.status < 300 && body.ok && body.draft && body.sessionId) {
             setDraft(body.draft);
             setSessionId(body.sessionId);
             const extractedCount = flattenItems(body.draft).length;
             if (extractedCount === 0) {
-            setMessage("Menu import finished, but no menu items were extracted.");
-          } else {
-            setMessage("Starter menu loaded. Fill prices, add protein variants if needed, then publish.");
-          }
+              setMessage("Menu import finished, but no menu items were extracted.");
+            } else {
+              setMessage("Starter menu loaded. Fill prices, add protein variants if needed, then publish.");
+            }
           } else {
             setMessage(xhr.status === 401 ? "Your session expired. Please sign in again and retry." : body.error ?? "Menu import failed.");
           }
           resolve();
         };
-      xhr.onerror = () => {
-        setUploading(false);
-        setMessage("Network error while uploading the menu.");
-        resolve();
-      };
-      xhr.send(formData);
-    });
+        xhr.onerror = () => {
+          setUploading(false);
+          setMessage("Network error while uploading the menu. Check your connection and try again.");
+          resolve();
+        };
+        xhr.onabort = () => {
+          setUploading(false);
+          setMessage("Upload was interrupted. Please try again.");
+          resolve();
+        };
+        try {
+          xhr.send(formData);
+        } catch {
+          setUploading(false);
+          setMessage("Could not start the upload. Please try again.");
+          resolve();
+        }
+      });
+    } catch {
+      setUploading(false);
+      setMessage("Upload failed. Please try again.");
+    }
   }
 
   function onFileChange(file: File | null) {
@@ -206,6 +294,7 @@ export default function SmartMenuImportClient() {
         })),
       };
     });
+    setFieldError((current) => (current?.itemId === itemId ? null : current));
   }
 
   function removeItem(itemId: string) {
@@ -254,52 +343,93 @@ export default function SmartMenuImportClient() {
     setSaving(true);
     setMessage(null);
     const token = await getAccessToken();
-    const response = await fetch(`/api/vendor/menu-import/${sessionId}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ draft }),
-    });
-    const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; draft?: MenuImportDraft } | null;
-    setSaving(false);
-    if (response.ok && body?.draft) setDraft(body.draft);
-    setMessage(
-      response.ok && body?.ok
-        ? "Review draft saved."
-        : response.status === 401
-          ? "Your session expired. Please sign in again and retry."
-          : body?.error ?? "Could not save review draft."
-    );
+    if (!token) {
+      setSaving(false);
+      setMessage("Could not verify your session. Please sign in again and retry.");
+      return;
+    }
+    try {
+      const response = await fetch(`/api/vendor/menu-import/${sessionId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ draft }),
+      });
+      const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; draft?: MenuImportDraft } | null;
+      setSaving(false);
+      if (response.ok && body?.draft) setDraft(body.draft);
+      setMessage(
+        response.ok && body?.ok
+          ? "Review draft saved."
+          : response.status === 401
+            ? "Your session expired. Please sign in again and retry."
+            : body?.error ?? "Could not save review draft."
+      );
+    } catch {
+      setSaving(false);
+      setMessage("Could not save right now. Check your connection and try again.");
+    }
   }
 
   async function publishMenu() {
     if (!draft || !sessionId) return;
+    const firstBlockingItem = findFirstBlockingItem(draft);
+    if (firstBlockingItem) {
+      const nextFieldError = buildFieldError(
+        firstBlockingItem,
+        firstBlockingItem.pricingType === "variant"
+          ? `${firstBlockingItem.name || "This item"} needs at least one valid variant price.`
+          : `${firstBlockingItem.name || "This item"} is missing a valid price.`
+      );
+      setFieldError(nextFieldError);
+      setMessage(nextFieldError.message);
+      scrollToItem(firstBlockingItem.id);
+      return;
+    }
     setPublishing(true);
     setPublishState("publishing");
     setMessage(null);
     const token = await getAccessToken();
-    const response = await fetch(`/api/vendor/menu-import/${sessionId}/publish`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ draft }),
-    });
-    const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    setPublishing(false);
-    if (response.ok && body?.ok) {
-      setPublishState("published");
-      setMessage("Menu published successfully.");
-      window.setTimeout(() => {
-        router.push("/vendor/food");
-      }, 1400);
+    if (!token) {
+      setPublishing(false);
+      setPublishState("idle");
+      setMessage("Could not verify your session. Please sign in again and retry.");
       return;
     }
-    setPublishState("idle");
-    setMessage(response.status === 401 ? "Your session expired. Please sign in again and retry." : body?.error ?? "Could not publish menu.");
+    try {
+      const response = await fetch(`/api/vendor/menu-import/${sessionId}/publish`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ draft }),
+      });
+      const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      setPublishing(false);
+      if (response.ok && body?.ok) {
+        setPublishState("published");
+        setMessage("Menu published successfully.");
+        window.setTimeout(() => {
+          router.push("/vendor/food");
+        }, 1400);
+        return;
+      }
+      setPublishState("idle");
+      const errorMessage = response.status === 401 ? "Your session expired. Please sign in again and retry." : body?.error ?? "Could not publish menu.";
+      setMessage(errorMessage);
+      const matchedItem = findItemMatchingError(draft, errorMessage);
+      if (matchedItem) {
+        setFieldError(buildFieldError(matchedItem, errorMessage));
+        scrollToItem(matchedItem.id);
+      }
+    } catch {
+      setPublishing(false);
+      setPublishState("idle");
+      setMessage("Could not publish right now. Check your connection and try again.");
+    }
   }
 
   return (
@@ -431,19 +561,32 @@ export default function SmartMenuImportClient() {
 
                 <div className="mt-4 space-y-3">
                   {category.items.map((item) => (
-                      <div key={item.id} className="rounded-3xl border bg-gray-50 p-4">
+                      <div
+                        key={item.id}
+                        ref={(node) => {
+                          itemRefs.current[item.id] = node;
+                        }}
+                        className="rounded-3xl border bg-gray-50 p-4"
+                      >
                         <div className="grid gap-3">
                           <div className="flex flex-wrap gap-2">
                             <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-700">{getPricingSummary(item)}</span>
                           </div>
 
                           <div className="grid grid-cols-2 gap-2">
-                            <input
-                              className="min-w-0 rounded-xl border bg-white px-3 py-2 text-sm"
-                              value={item.name}
-                              placeholder="Item name"
-                              onChange={(event) => updateItem(item.id, (current) => ({ ...current, name: event.target.value }))}
-                            />
+                            <div className="space-y-1">
+                              {fieldError?.itemId === item.id && fieldError.field === "name" ? (
+                                <p className="text-xs font-medium text-red-600">! {fieldError.message}</p>
+                              ) : null}
+                              <input
+                                className={`min-w-0 rounded-xl border bg-white px-3 py-2 text-sm ${
+                                  fieldError?.itemId === item.id && fieldError.field === "name" ? "border-red-400 ring-1 ring-red-200" : ""
+                                }`}
+                                value={item.name}
+                                placeholder="Item name"
+                                onChange={(event) => updateItem(item.id, (current) => ({ ...current, name: event.target.value }))}
+                              />
+                            </div>
                             <input
                               className="min-w-0 rounded-xl border bg-white px-3 py-2 text-sm"
                               value={item.categoryName}
@@ -454,18 +597,25 @@ export default function SmartMenuImportClient() {
 
                           <div className="grid grid-cols-2 gap-2">
                             {item.pricingType !== "variant" && item.platformCategory !== "soup" ? (
-                              <input
-                                className="min-w-0 rounded-xl border bg-white px-3 py-2 text-sm"
-                                inputMode="numeric"
-                                value={item.price ?? ""}
-                                onChange={(event) =>
-                                  updateItem(item.id, (current) => ({
-                                    ...current,
-                                    price: event.target.value ? Number(event.target.value) : null,
-                                  }))
-                                }
-                                placeholder="Price"
-                              />
+                              <div className="space-y-1">
+                                {fieldError?.itemId === item.id && fieldError.field === "price" ? (
+                                  <p className="text-xs font-medium text-red-600">! {fieldError.message}</p>
+                                ) : null}
+                                <input
+                                  className={`min-w-0 rounded-xl border bg-white px-3 py-2 text-sm ${
+                                    fieldError?.itemId === item.id && fieldError.field === "price" ? "border-red-400 ring-1 ring-red-200" : ""
+                                  }`}
+                                  inputMode="numeric"
+                                  value={item.price ?? ""}
+                                  onChange={(event) =>
+                                    updateItem(item.id, (current) => ({
+                                      ...current,
+                                      price: event.target.value ? Number(event.target.value) : null,
+                                    }))
+                                  }
+                                  placeholder="Price"
+                                />
+                              </div>
                             ) : item.platformCategory === "soup" ? (
                               <div className="min-w-0 rounded-xl bg-white px-3 py-2 text-sm text-gray-400">No price needed</div>
                             ) : (
@@ -529,6 +679,9 @@ export default function SmartMenuImportClient() {
                           {item.variants.length > 0 ? (
                             <div className="rounded-2xl border bg-white p-3">
                               <p className="text-xs font-medium text-gray-600">Variants</p>
+                              {fieldError?.itemId === item.id && fieldError.field === "variant" ? (
+                                <p className="mt-2 text-xs font-medium text-red-600">! {fieldError.message}</p>
+                              ) : null}
                               <div className="mt-2 space-y-2">
                                 {item.variants.map((variant) => (
                                   <div key={variant.id} className="grid grid-cols-[minmax(0,1fr)_96px] gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
@@ -550,7 +703,11 @@ export default function SmartMenuImportClient() {
                                       }
                                     />
                                     <input
-                                      className="min-w-0 rounded-xl border px-3 py-2 text-sm"
+                                      className={`min-w-0 rounded-xl border px-3 py-2 text-sm ${
+                                        fieldError?.itemId === item.id && fieldError.field === "variant" && !(Number(variant.price) > 0)
+                                          ? "border-red-400 ring-1 ring-red-200"
+                                          : ""
+                                      }`}
                                       inputMode="numeric"
                                       value={variant.price}
                                       placeholder="Price"
