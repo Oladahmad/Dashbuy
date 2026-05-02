@@ -14,3 +14,27 @@
  GET /vendor/food/import 500 in 185ms (compile: 158ms, render: 27ms)
  GET /vendor/food/import 200 in 5.0s (compile: 1854ms, render: 3.1s)
 ○ Compiling /manifest.webmanifest ...
+ GET /manifest.webmanifest 200 in 8.6s (compile: 8.5s, render: 77ms)
+○ Compiling / ...
+ GET / 200 in 10.4s (compile: 9.6s, render: 803ms)
+ GET /manifest.webmanifest 200 in 216ms (compile: 97ms, render: 119ms)
+ GET /api/catalog/products 200 in 3.8s (compile: 2.6s, render: 1239ms)
+○ Compiling /account ...
+ GET /account 200 in 5.0s (compile: 4.8s, render: 250ms)
+ GET /manifest.webmanifest 200 in 45ms (compile: 27ms, render: 17ms)
+ GET /api/wallet/history?filter=all 200 in 3.9s (compile: 1805ms, render: 2.1s)
+ GET /auth/login 200 in 2.3s (compile: 2.1s, render: 139ms)
+ GET /manifest.webmanifest 200 in 47ms (compile: 27ms, render: 19ms)
+ GET /vendor 200 in 2.4s (compile: 2.3s, render: 160ms)
+ GET /manifest.webmanifest 200 in 39ms (compile: 23ms, render: 16ms)
+○ Compiling /api/vendor/recent-order-buyers ...
+ GET /vendor/food/import 200 in 3.5s (compile: 3.2s, render: 289ms)
+ GET /manifest.webmanifest 200 in 34ms (compile: 17ms, render: 18ms)
+ POST /api/vendor/recent-order-buyers 200 in 6.7s (compile: 4.6s, render: 2.1s)
+○ Compiling /api/vendor/menu-import ...
+ POST /api/vendor/menu-import 200 in 14.7s (compile: 10.3s, render: 4.5s)
+○ Compiling /api/vendor/menu-import/[sessionId]/publish ...
+ POST /api/vendor/menu-import/a904920a-92d1-46d1-891f-2f7a705abe57/publish 500 in 7.3s (compile: 6.1s, render: 1266ms)
+ POST /api/vendor/menu-import/a904920a-92d1-46d1-891f-2f7a705abe57/publish 200 in 18.2s (compile: 18ms, render: 18.1s)
+ GET /vendor/food 200 in 3.6s (compile: 3.3s, render: 223ms)
+ GET /manifest.webmanifest 200 in 2.0s (compile: 2.0s, render: 31ms)
